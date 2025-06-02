@@ -61,7 +61,7 @@ impl LayoutStrategy for StructStrategy {
             let (sequence_id, chunk) = chunk?;
             let mut sequence_pointer = sequence_id.descend();
             let struct_chunk = chunk.to_struct()?;
-            let columns: Vec<_> = (0..struct_chunk.struct_dtype().nfields())
+            let columns: Vec<_> = (0..struct_chunk.struct_fields().nfields())
                 .map(|idx| {
                     (
                         sequence_pointer.advance(),
