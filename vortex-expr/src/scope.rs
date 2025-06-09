@@ -113,6 +113,15 @@ impl Scope {
         self.vars.insert(ident, var);
         self
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Identifier, &ArrayRef)> {
+        let values = self.arrays.iter();
+
+        self.root_scope
+            .iter()
+            .map(|s| (&Identifier::Identity, s))
+            .chain(values)
+    }
 }
 
 impl From<ArrayRef> for Scope {
