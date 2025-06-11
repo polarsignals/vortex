@@ -12,6 +12,7 @@ use std::sync::{Arc, OnceLock};
 
 use arrow_buffer::{BooleanBuffer, BooleanBufferBuilder, NullBuffer};
 use itertools::Itertools;
+use vortex_error::{VortexResult, vortex_err};
 
 /// Represents a set of values that are all included, all excluded, or some mixture of both.
 pub enum AllOr<T> {
@@ -508,6 +509,35 @@ impl Mask {
             Self::Values(values) => Some(values),
             _ => None,
         }
+    }
+
+    /// Given monotonically increasing `indices` in [0, n_rows], returns the
+    /// count of valid elements up to each index.
+    ///
+    /// This is O(n_rows).
+    pub fn valid_counts_for_indices(&self, indices: &[usize]) -> VortexResult<Vec<usize>> {
+        Ok(match self {
+            Self::AllTrue(_) => indices.to_vec(),
+            Self::AllFalse(_) => vec![0; indices.len()],
+            Self::Values(values) => {
+                let mut bool_iter = values.boolean_buffer().iter();
+                let mut valid_counts = Vec::with_capacity(indices.len());
+                let mut valid_count = 0;
+                let mut idx = 0;
+                for &next_idx in indices {
+                    while idx < next_idx {
+                        idx += 1;
+                        valid_count += bool_iter
+                            .next()
+                            .ok_or_else(|| vortex_err!("Row indices exceed array length"))?
+                            as usize;
+                    }
+                    valid_counts.push(valid_count);
+                }
+
+                valid_counts
+            }
+        })
     }
 
     /// Limit the mask to the first `limit` true values
