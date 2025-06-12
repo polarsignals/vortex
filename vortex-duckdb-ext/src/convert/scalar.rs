@@ -1,3 +1,21 @@
+//! Scalar value conversion between Vortex and DuckDB.
+//!
+//! This module provides functionality to convert Vortex scalar values to DuckDB values.
+//!
+//! Note that nullability of Vortex scalars is not transferred to DuckDB scalars.
+//!
+//! # Supported Scalar Conversions
+//!
+//! | Vortex Scalar | DuckDB Value |
+//! |---------------|--------------|
+//! | `Null` | `NULL` |
+//! | `Bool` | `BOOLEAN` |
+//! | `Primitive` (integers/floats) | Corresponding numeric types |
+//! | `Decimal` | `DECIMAL` |
+//! | `Utf8` | `VARCHAR` |
+//! | `Binary` | `BLOB` |
+//! | `ExtScalar` (temporal) | `DATE`/`TIME`/`TIMESTAMP` |
+
 use vortex::dtype::datetime::{TemporalMetadata, TimeUnit};
 use vortex::dtype::half::f16;
 use vortex::dtype::{DType, PType, match_each_native_simd_ptype};
@@ -9,12 +27,22 @@ use vortex::scalar::{
 
 use crate::duckdb::Value;
 
+/// Trait for converting Vortex scalars to DuckDB values.
 pub trait ToDuckDBScalar {
     fn try_to_duckdb_scalar(&self) -> VortexResult<Value>;
 }
 
 impl ToDuckDBScalar for Scalar {
+    /// Converts a generic Vortex scalar to a DuckDB value.
+    ///
+    /// # Note
+    ///
+    /// Struct and List scalars are not yet implemented and cause a panic.
     fn try_to_duckdb_scalar(&self) -> VortexResult<Value> {
+        if self.is_null() {
+            return Ok(Value::null());
+        }
+
         match self.dtype() {
             DType::Null => Ok(Value::null()),
             DType::Bool(_) => self.as_bool().try_to_duckdb_scalar(),
@@ -29,6 +57,11 @@ impl ToDuckDBScalar for Scalar {
 }
 
 impl ToDuckDBScalar for PrimitiveScalar<'_> {
+    /// Converts a primitive scalar (integer, float, or boolean) to a DuckDB value.
+    ///
+    /// # Note
+    ///
+    /// - `F16` values are converted to `F32` before creating the DuckDB value
     fn try_to_duckdb_scalar(&self) -> VortexResult<Value> {
         if self.ptype() == PType::F16 {
             return Ok(Value::from(
@@ -46,6 +79,18 @@ impl ToDuckDBScalar for PrimitiveScalar<'_> {
 }
 
 impl ToDuckDBScalar for DecimalScalar<'_> {
+    /// Converts a decimal scalar to a DuckDB decimal value.
+    ///
+    /// # Supported Decimal Types
+    ///
+    /// - `I8`, `I16`, `I32`, `I64` - Converted to `i128` for DuckDB
+    /// - `I128` - Used directly
+    /// - `I256` - Not supported, returns an error
+    ///
+    /// # Note: Scalar vs Array Conversion Differences
+    ///
+    /// This scalar conversion always uses `i128` for all decimal values regardless of precision,
+    /// which differs from the array conversion logic that uses precision-based storage optimization.
     fn try_to_duckdb_scalar(&self) -> VortexResult<Value> {
         let decimal_type = self
             .dtype()
@@ -74,12 +119,14 @@ impl ToDuckDBScalar for DecimalScalar<'_> {
 }
 
 impl ToDuckDBScalar for BoolScalar<'_> {
+    /// Converts a boolean scalar to a DuckDB boolean value.
     fn try_to_duckdb_scalar(&self) -> VortexResult<Value> {
         Ok(Value::from(self.value()))
     }
 }
 
 impl ToDuckDBScalar for Utf8Scalar<'_> {
+    /// Converts a UTF-8 string scalar to a DuckDB VARCHAR value.
     fn try_to_duckdb_scalar(&self) -> VortexResult<Value> {
         Ok(match self.value() {
             Some(value) => Value::from(value.as_str()),
@@ -89,6 +136,7 @@ impl ToDuckDBScalar for Utf8Scalar<'_> {
 }
 
 impl ToDuckDBScalar for BinaryScalar<'_> {
+    /// Converts a binary scalar to a DuckDB BLOB value.
     fn try_to_duckdb_scalar(&self) -> VortexResult<Value> {
         Ok(match self.value() {
             Some(value) => Value::from(value.as_slice()),
@@ -98,6 +146,7 @@ impl ToDuckDBScalar for BinaryScalar<'_> {
 }
 
 impl ToDuckDBScalar for ExtScalar<'_> {
+    /// Converts an extension scalar (primarily temporal types) to a DuckDB value.
     fn try_to_duckdb_scalar(&self) -> VortexResult<Value> {
         let time = TemporalMetadata::try_from(self.ext_dtype())?;
         let value = || {
