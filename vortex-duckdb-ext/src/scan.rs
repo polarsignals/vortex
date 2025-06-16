@@ -1,9 +1,12 @@
 use std::path::PathBuf;
 
+use bitvec::macros::internal::funty::Fundamental;
 use crossbeam_queue::SegQueue;
-use vortex::error::{VortexResult, vortex_bail, vortex_err};
+use vortex::error::{VortexExpect, VortexResult, vortex_bail, vortex_err};
+use vortex::expr::{ExprRef, and, and_collect, lit};
 use vortex::file::{VortexFile, VortexOpenOptions};
 
+use crate::convert::{try_from_bound_expression, try_from_table_filter};
 use crate::duckdb::{
     BindInput, BindResult, DataChunk, Expression, LogicalType, TableFunction, TableInitInput,
 };
@@ -12,11 +15,14 @@ use crate::exporter::ArrayIteratorExporter;
 pub struct VortexBindData {
     _first_file: VortexFile,
     file_list: SegQueue<PathBuf>,
+    filter_exprs: Vec<ExprRef>,
     _column_names: Vec<String>,
     _column_types: Vec<LogicalType>,
 }
 
-pub struct VortexGlobalData {}
+pub struct VortexGlobalData {
+    filter_expr: ExprRef,
+}
 
 pub struct VortexLocalData {
     exporter: Option<ArrayIteratorExporter>,
@@ -54,6 +60,8 @@ impl TableFunction for VortexTableFunction {
     type BindData = VortexBindData;
     type GlobalState = VortexGlobalData;
     type LocalState = VortexLocalData;
+
+    const FILTER_PUSHDOWN: bool = true;
 
     /// Input parameter types of the `vortex_scan` table function.
     ///
@@ -97,13 +105,14 @@ impl TableFunction for VortexTableFunction {
             _first_file: first_file,
             _column_names: column_names,
             _column_types: column_types,
+            filter_exprs: vec![],
         })
     }
 
     fn scan(
         bind_data: &Self::BindData,
         local_state: &mut Self::LocalState,
-        _global_state: &mut Self::GlobalState,
+        global_state: &mut Self::GlobalState,
         chunk: &mut DataChunk,
     ) -> VortexResult<()> {
         if local_state.exporter.is_none() {
@@ -114,6 +123,7 @@ impl TableFunction for VortexTableFunction {
 
                 let array_iter = file
                     .scan()?
+                    .with_filter(global_state.filter_expr.clone())
                     .into_array_iter()
                     .map_err(|e| vortex_err!("Failed to create array iterator: {}", e))?;
 
@@ -140,8 +150,33 @@ impl TableFunction for VortexTableFunction {
         Ok(())
     }
 
-    fn init_global(_init: &TableInitInput<Self>) -> VortexResult<Self::GlobalState> {
-        Ok(VortexGlobalData {})
+    fn init_global(init: &TableInitInput<Self>) -> VortexResult<Self::GlobalState> {
+        let complex_filter = and_collect(init.bind_data().filter_exprs.clone());
+
+        let filter = init
+            .table_filter_set()
+            .and_then(|filter| {
+                filter
+                    .into_iter()
+                    .map(|(idx, ex)| {
+                        let name = init
+                            .bind_data()
+                            ._column_names
+                            .get(idx.as_usize())
+                            .vortex_expect("exists");
+                        try_from_table_filter(&ex, name)
+                    })
+                    .reduce(|l, r| Ok(and(l?, r?)))
+            })
+            .transpose()?;
+
+        let filter_expr = complex_filter
+            .into_iter()
+            .chain(filter)
+            .reduce(and)
+            .unwrap_or_else(|| lit(true));
+
+        Ok(VortexGlobalData { filter_expr })
     }
 
     fn init_local(
@@ -152,10 +187,12 @@ impl TableFunction for VortexTableFunction {
     }
 
     fn pushdown_complex_filter(
-        _bind_data: &mut Self::BindData,
-        _expr: &Expression,
+        bind_data: &mut Self::BindData,
+        expr: &Expression,
     ) -> VortexResult<bool> {
-        Ok(false)
+        let expr = try_from_bound_expression(expr)?;
+        bind_data.filter_exprs.push(expr);
+        Ok(true)
     }
 }
 
