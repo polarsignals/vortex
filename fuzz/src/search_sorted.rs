@@ -6,8 +6,8 @@ use vortex_array::search_sorted::{IndexOrd, SearchResult, SearchSorted, SearchSo
 use vortex_array::{Array, ToCanonical};
 use vortex_buffer::{BufferString, ByteBuffer};
 use vortex_dtype::{DType, NativePType, match_each_native_ptype};
-use vortex_error::VortexResult;
-use vortex_scalar::Scalar;
+use vortex_error::{VortexResult, vortex_err};
+use vortex_scalar::{Scalar, match_each_decimal_value_type};
 
 struct SearchNullableSlice<T>(Vec<Option<T>>);
 
@@ -76,6 +76,31 @@ pub fn search_sorted_canonical_array(
                 Ok(SearchPrimitiveSlice(opt_values).search_sorted(&Some(to_find), side))
             })
         }
+        DType::Decimal(d, _) => {
+            let decimal_array = array.to_decimal()?;
+            let validity = decimal_array.validity_mask()?.to_boolean_buffer();
+            match_each_decimal_value_type!(decimal_array.values_type(), |D| {
+                let buf = decimal_array.buffer::<D>();
+                let opt_values = buf
+                    .as_slice()
+                    .iter()
+                    .copied()
+                    .zip(validity.iter())
+                    .map(|(b, v)| v.then_some(b))
+                    .collect::<Vec<_>>();
+                let to_find: D = scalar
+                    .as_decimal()
+                    .decimal_value()
+                    .map(|v| {
+                        v.cast::<D>().ok_or_else(|| {
+                            vortex_err!("cannot cast value {v} to decimal value type {d}")
+                        })
+                    })
+                    .transpose()?
+                    .ok_or_else(|| vortex_err!("unexpected null scalar"))?;
+                Ok(SearchNullableSlice(opt_values).search_sorted(&Some(to_find), side))
+            })
+        }
         DType::Utf8(_) | DType::Binary(_) => {
             let utf8 = array.to_varbinview()?;
             let opt_values =
@@ -99,6 +124,8 @@ pub fn search_sorted_canonical_array(
                 .collect::<VortexResult<Vec<_>>>()?;
             Ok(scalar_vals.search_sorted(&scalar.cast(array.dtype())?, side))
         }
-        d => unreachable!("DType {d} not supported for fuzzing"),
+        d @ (DType::Null | DType::Extension(_)) => {
+            unreachable!("DType {d} not supported for fuzzing")
+        }
     }
 }

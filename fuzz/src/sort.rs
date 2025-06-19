@@ -1,10 +1,11 @@
 use std::cmp::Ordering;
 
 use vortex_array::accessor::ArrayAccessor;
-use vortex_array::arrays::{BoolArray, PrimitiveArray, VarBinViewArray};
+use vortex_array::arrays::{BoolArray, DecimalArray, PrimitiveArray, VarBinViewArray};
 use vortex_array::{Array, ArrayRef, IntoArray, ToCanonical};
 use vortex_dtype::{DType, NativePType, match_each_native_ptype};
 use vortex_error::{VortexExpect, VortexResult, VortexUnwrap};
+use vortex_scalar::match_each_decimal_value_type;
 
 use crate::take::take_canonical_array;
 
@@ -33,6 +34,21 @@ pub fn sort_canonical_array(array: &dyn Array) -> VortexResult<ArrayRef> {
                     .collect::<Vec<_>>();
                 sort_primitive_slice(&mut opt_values);
                 Ok(PrimitiveArray::from_option_iter(opt_values).into_array())
+            })
+        }
+        DType::Decimal(d, _) => {
+            let decimal_array = array.to_decimal()?;
+            match_each_decimal_value_type!(decimal_array.values_type(), |D| {
+                let buf = decimal_array.buffer::<D>();
+                let mut opt_values = buf
+                    .as_slice()
+                    .iter()
+                    .copied()
+                    .zip(decimal_array.validity_mask()?.to_boolean_buffer().iter())
+                    .map(|(p, v)| v.then_some(p))
+                    .collect::<Vec<_>>();
+                opt_values.sort();
+                Ok(DecimalArray::from_option_iter(opt_values, *d).into_array())
             })
         }
         DType::Utf8(_) | DType::Binary(_) => {
@@ -64,7 +80,9 @@ pub fn sort_canonical_array(array: &dyn Array) -> VortexResult<ArrayRef> {
             });
             take_canonical_array(array, &sort_indices)
         }
-        d => unreachable!("DType {d} not supported for fuzzing"),
+        d @ (DType::Null | DType::Extension(_)) => {
+            unreachable!("DType {d} not supported for fuzzing")
+        }
     }
 }
 

@@ -105,7 +105,7 @@ impl StructArray {
             if field.len() != length {
                 vortex_bail!(
                     "Expected all struct fields to have length {length}, found {}",
-                    field.len()
+                    fields.iter().map(|f| f.len()).format(","),
                 );
             }
         }
