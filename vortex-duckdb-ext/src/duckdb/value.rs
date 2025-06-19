@@ -86,6 +86,16 @@ impl Value {
     pub fn as_i64(&self) -> i64 {
         unsafe { cpp::duckdb_get_int64(self.ptr) }
     }
+
+    pub fn as_i128(&self) -> i128 {
+        let huge = unsafe { cpp::duckdb_get_hugeint(self.ptr) };
+        i128_from_parts(huge.upper, huge.lower)
+    }
+}
+
+#[inline]
+pub fn i128_from_parts(high: i64, low: u64) -> i128 {
+    ((high as i128) << 64) | (low as i128)
 }
 
 impl Debug for Value {
@@ -189,5 +199,25 @@ impl From<&str> for Value {
 impl From<&[u8]> for Value {
     fn from(value: &[u8]) -> Self {
         unsafe { Self::own(cpp::duckdb_create_blob(value.as_ptr(), value.len() as _)) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::duckdb::i128_from_parts;
+
+    #[test]
+    fn test_huge_int_from_parts() {
+        assert_eq!(i128_from_parts(0, 0), 0i128);
+        assert_eq!(i128_from_parts(0, 34534912), 34534912i128);
+        assert_eq!(i128_from_parts(i64::MIN, 0), i128::MIN);
+        assert_eq!(i128_from_parts(i64::MAX, u64::MAX), i128::MAX);
+
+        assert_eq!(i128_from_parts(0, u64::MAX), u64::MAX as i128);
+        assert_eq!(
+            i128_from_parts(1, u64::MAX),
+            (1i128 << 64) + (u64::MAX as i128)
+        );
     }
 }
