@@ -1,5 +1,11 @@
-[target.'(target_familiy="unix")']
-rustflags = ["-C", "force-frame-pointers=yes"]
+[target.'cfg(target_family="unix")']
+rustflags = [
+    "-C", "force-frame-pointers=yes",
+    # Add dynamic DuckDB library directory to runtime search path.
+    "-C", "link-arg=-Wl,-rpath,$ORIGIN/../duckdb-v1.3.0",
+    "-C", "link-arg=-Wl,-rpath,@executable_path/../duckdb-v1.3.0"
+]
+
 [target.wasm32-unknown-unknown]
 rustflags = ['--cfg', 'getrandom_backend="wasm_js"', '-C', 'target-feature=+atomics']
 
