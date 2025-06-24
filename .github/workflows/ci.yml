@@ -71,7 +71,6 @@ jobs:
         with:
           submodules: "recursive"
       - uses: ./.github/actions/cleanup
-      - uses: rui314/setup-mold@v1
       - uses: ./.github/actions/setup-rust
       - name: Install uv
         uses: spiraldb/actions/.github/actions/setup-uv@0.11.0
@@ -130,8 +129,12 @@ jobs:
       - family=m7i+m7i-flex+m7a
       - cpu=8
       - image=ubuntu24-full-x64
+      - extras=s3-cache
       - tag=rust-docs
     steps:
+      - uses: runs-on/action@v2
+        with:
+          sccache: s3
       - uses: actions/checkout@v4
         with:
           submodules: "recursive"
@@ -150,8 +153,8 @@ jobs:
       - family=m7i+m7i-flex+m7a
       - cpu=8
       - image=ubuntu24-full-x64
+      - extras=s3-cache
       - tag=${{ matrix.config.name }}
-
     env:
       # disable lints for build, they will be caught in Rust lint job.
       RUSTFLAGS: '-A warnings'
@@ -181,11 +184,13 @@ jobs:
               rustflags: 'RUSTFLAGS="-A warnings --cfg getrandom_backend=\"wasm_js\""'
             args: "--target wasm32-unknown-unknown --exclude vortex --exclude vortex-datafusion --exclude vortex-duckdb --exclude vortex-tui --exclude vortex-zstd"
     steps:
-      - uses: runs-on/action@v1
+      - uses: runs-on/action@v2
+        with:
+          sccache: s3
       - uses: actions/checkout@v4
         with:
           submodules: "recursive"
-      - uses: rui314/setup-mold@v1
+      - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/setup-c++
       - name: Install wasm32 target
         if: ${{ matrix.config.target == 'wasm32-unknown-unknown' }}
@@ -203,13 +208,16 @@ jobs:
       - family=m7i+m7i-flex+m7a
       - cpu=8
       - image=ubuntu24-full-x64
+      - extras=s3-cache
       - tag=rust-min-deps
     steps:
-      - uses: runs-on/action@v1
+      - uses: runs-on/action@v2
+        with:
+          sccache: s3
       - uses: actions/checkout@v4
         with:
           submodules: "recursive"
-      - uses: rui314/setup-mold@v1
+      - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/setup-c++
       - uses: taiki-e/install-action@cargo-hack
       - uses: taiki-e/install-action@cargo-minimal-versions
@@ -223,13 +231,16 @@ jobs:
       - family=m7i+m7i-flex+m7a
       - cpu=16
       - image=ubuntu24-full-x64
+      - extras=s3-cache
       - tag=rust-lint
     steps:
-      - uses: runs-on/action@v1
+      - uses: runs-on/action@v2
+        with:
+          sccache: s3
       - uses: actions/checkout@v4
         with:
           submodules: "recursive"
-      - uses: rui314/setup-mold@v1
+      - uses: ./.github/actions/setup-rust
       - name: Rust Lint - Format
         run: cargo fmt --all --check
       - name: Rustc check
@@ -247,13 +258,16 @@ jobs:
       - family=m7i+m7i-flex+m7a
       - cpu=16
       - image=ubuntu24-full-x64
+      - extras=s3-cache
       - tag=rust-lint
     steps:
-      - uses: runs-on/action@v1
+      - uses: runs-on/action@v2
+        with:
+          sccache: s3
       - uses: actions/checkout@v4
         with:
           submodules: "recursive"
-      - uses: rui314/setup-mold@v1
+      - uses: ./.github/actions/setup-rust
       - name: Install cargo-hack
         uses: taiki-e/install-action@cargo-hack
       - name: Rust Lint - Clippy No Default Features
@@ -270,6 +284,7 @@ jobs:
       - family=m7i+m7i-flex+m7a
       - cpu=8
       - image=ubuntu24-full-x64
+      - extras=s3-cache
       - tag=rust-test
     steps:
       # Disable lints when running tests. They will be caught by the Rust lint job.
@@ -291,7 +306,7 @@ jobs:
         with:
           submodules: "recursive"
       - uses: ./.github/actions/cleanup
-      - uses: rui314/setup-mold@v1
+      - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/setup-c++
       - name: Install grcov
         if: github.ref == 'refs/heads/develop'
@@ -347,15 +362,17 @@ jobs:
     runs-on:
       - runs-on=${{ github.run_id }}
       - family=c6id.8xlarge
-      - spot=false
+      - extras=s3-cache
       - image=ubuntu24-full-x64
 
     steps:
-      - uses: runs-on/action@v1
+      - uses: runs-on/action@v2
+        with:
+          sccache: s3
       - uses: actions/checkout@v4
         with:
           submodules: "recursive"
-      # rustup is pre-installed on the ubuntu24-full-x64 image.
+      - uses: ./.github/actions/setup-rust
 
       - name: Install Codspeed
         shell: bash
@@ -407,7 +424,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: rui314/setup-mold@v1
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
         with:
@@ -427,7 +443,6 @@ jobs:
       MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check -Zmiri-backtrace=full -Zmiri-disable-isolation
       RUSTFLAGS: "-A warnings"
     steps:
-      - uses: rui314/setup-mold@v1
       - uses: actions/checkout@v4
         with:
           submodules: "recursive"
@@ -451,7 +466,6 @@ jobs:
         with:
           submodules: "recursive"
       - uses: ./.github/actions/cleanup
-      - uses: rui314/setup-mold@v1
       - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/setup-flatc
       - name: Install Protoc
