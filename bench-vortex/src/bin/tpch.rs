@@ -399,8 +399,6 @@ fn verify_duckdb_tpch_results(
             queries
                 .as_ref()
                 .is_none_or(|queries| queries.contains(&(entry.0 + 1)))
-                // Skip query 6 until fixed.
-                && entry.0 != 5
         })
         .map(|query_file| query_file.1)
     {
