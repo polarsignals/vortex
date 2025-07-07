@@ -4,7 +4,7 @@
 use std::fs::File;
 use std::io::{Write, stdout};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use bench_vortex::display::{DisplayFormat, print_measurements_json, render_table};
 use bench_vortex::measurements::QueryMeasurement;
@@ -125,7 +125,7 @@ fn main() -> anyhow::Result<()> {
         runtime.block_on(dataset.register_tables(&session, file_type))?;
 
         for (query_idx, query) in queries.clone().into_iter() {
-            let mut fastest_run = Duration::from_millis(u64::MAX);
+            let mut runs = Vec::with_capacity(args.iterations);
             let mut last_plan = None;
             for iteration in 0..args.iterations {
                 let exec_duration = runtime.block_on(async {
@@ -148,7 +148,7 @@ fn main() -> anyhow::Result<()> {
 
                     start.elapsed()
                 });
-                fastest_run = fastest_run.min(exec_duration);
+                runs.push(exec_duration);
             }
 
             let plan = last_plan.vortex_expect("must have at least one iteration");
@@ -166,7 +166,7 @@ fn main() -> anyhow::Result<()> {
                     name: pbi_dataset.name.clone(),
                 },
                 storage: STORAGE_NVME.to_owned(),
-                fastest_run,
+                runs,
             });
 
             progress_bar.inc(1);
