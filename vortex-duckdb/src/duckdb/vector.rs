@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::ptr;
 
 use bitvec::macros::internal::funty::Fundamental;
 use bitvec::slice::BitSlice;
-use vortex::error::{VortexResult, vortex_bail};
+use vortex::error::{VortexResult, VortexUnwrap, vortex_bail, vortex_err};
 
 use crate::cpp::duckdb_vx_error;
 use crate::duckdb::data::Data;
@@ -43,6 +43,26 @@ impl Vector {
                 self.as_ptr(),
                 sel_vec.as_ptr(),
                 sel_vec_length as _,
+            )
+        }
+    }
+
+    // Used to by duckdb to know the dictionary value length (since each vector doesn't know its own
+    // length only its capacity).
+    pub fn set_dictionary_len(&mut self, len: u32) {
+        unsafe { cpp::duckdb_vx_set_dictionary_vector_length(self.as_ptr(), len) }
+    }
+
+    // A pipeline-scoped id to assert dictionary vector value uniqueness
+    pub fn set_dictionary_id(&mut self, dict_id: String) {
+        let dict_id = CString::new(dict_id)
+            .map_err(|e| vortex_err!("cstr creation error {e}"))
+            .vortex_unwrap();
+        unsafe {
+            cpp::duckdb_vx_set_dictionary_vector_id(
+                self.ptr,
+                dict_id.as_ptr(),
+                dict_id.as_bytes().len().as_u32(),
             )
         }
     }

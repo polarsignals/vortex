@@ -4,12 +4,13 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use bitvec::macros::internal::funty::Fundamental;
 use num_traits::AsPrimitive;
-use vortex::ToCanonical;
 use vortex::arrays::PrimitiveArray;
 use vortex::dtype::{NativePType, match_each_integer_ptype};
 use vortex::encodings::dict::DictArray;
 use vortex::error::VortexResult;
+use vortex::{Array, ToCanonical};
 
 use crate::duckdb::{SelectionVector, Vector};
 use crate::exporter::cache::ConversionCache;
@@ -18,8 +19,11 @@ use crate::exporter::{ColumnExporter, new_array_exporter};
 struct DictExporter<I: NativePType> {
     // Store the dictionary values once and export the same dictionary with each codes chunk.
     values_vector: Vector, // NOTE(ngates): not actually flat...
+    values_len: u32,
     codes: PrimitiveArray,
     codes_type: PhantomData<I>,
+    cache_id: u64,
+    value_id: usize,
 }
 
 pub(crate) fn new_exporter(
@@ -47,8 +51,11 @@ pub(crate) fn new_exporter(
     match_each_integer_ptype!(codes.ptype(), |I| {
         Ok(Box::new(DictExporter {
             values_vector,
+            values_len: values.len().as_u32(),
             codes,
             codes_type: PhantomData::<I>,
+            cache_id: cache.instance_id,
+            value_id: values_key,
         }))
     })
 }
@@ -70,6 +77,10 @@ impl<I: NativePType + AsPrimitive<u32>> ColumnExporter for DictExporter<I> {
         }
 
         vector.slice_to_dictionary(sel_vec, len);
+        // Use a unique id to each dictionary data array -- telling duckdb that the dict value vector
+        // is the same as reuse the hash in a join.
+        vector.set_dictionary_id(format!("{}-{}", self.cache_id, self.value_id));
+        vector.set_dictionary_len(self.values_len);
 
         Ok(())
     }
