@@ -4,13 +4,13 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
-use std::clone::Clone;
-use std::fmt::Display;
-use std::str::FromStr;
-
 use clap::ValueEnum;
 use itertools::Itertools;
 use serde::Serialize;
+use std::clone::Clone;
+use std::fmt::Display;
+use std::str::FromStr;
+use std::sync::Arc;
 
 pub mod bench_run;
 pub mod benchmark_driver;
@@ -111,6 +111,9 @@ pub enum Format {
     #[clap(name = "vortex")]
     #[serde(rename = "vortex")]
     OnDiskVortex,
+    #[clap(name = "vortex-compact")]
+    #[serde(rename = "vortex-compact")]
+    VortexCompact,
     #[clap(name = "duckdb")]
     #[serde(rename = "duckdb")]
     OnDiskDuckDB,
@@ -129,6 +132,7 @@ impl Format {
             Format::Arrow => "arrow",
             Format::Parquet => "parquet",
             Format::OnDiskVortex => "vortex-file-compressed",
+            Format::VortexCompact => "vortex-compact",
             Format::OnDiskDuckDB => "duckdb",
         }
     }
@@ -139,6 +143,7 @@ impl Format {
             Format::Arrow => "arrow",
             Format::Parquet => "parquet",
             Format::OnDiskVortex => "vortex",
+            Format::VortexCompact => "vortex",
             Format::OnDiskDuckDB => "duckdb",
         }
     }
@@ -172,3 +177,28 @@ impl Display for Engine {
 pub use utils::file_utils::*;
 pub use utils::logging::*;
 use vortex::error::{VortexUnwrap, vortex_err};
+use vortex_file::{VortexLayoutStrategy, VortexWriteOptions};
+use vortex_layout::LocalExecutor;
+use vortex_layout::layouts::compact::CompactCompressor;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum CompactionStrategy {
+    Compact,
+    #[default]
+    Default,
+}
+
+impl CompactionStrategy {
+    pub fn apply_options(&self, options: VortexWriteOptions) -> VortexWriteOptions {
+        match self {
+            CompactionStrategy::Compact => {
+                let executor = Arc::new(LocalExecutor);
+                let compressor = CompactCompressor::default();
+                let compact_strategy =
+                    VortexLayoutStrategy::compact_with_executor(executor, compressor);
+                options.with_strategy(compact_strategy)
+            }
+            CompactionStrategy::Default => options,
+        }
+    }
+}
