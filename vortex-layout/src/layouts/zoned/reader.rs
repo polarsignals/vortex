@@ -18,7 +18,7 @@ use vortex_dtype::{DType, FieldMask, FieldPath, FieldPathSet};
 use vortex_error::{SharedVortexResult, VortexError, VortexExpect, VortexResult};
 use vortex_expr::dynamic::DynamicExprUpdates;
 use vortex_expr::pruning::checked_pruning_expr;
-use vortex_expr::{ExprRef, Scope, root};
+use vortex_expr::{ExprRef, root};
 use vortex_mask::Mask;
 
 use crate::layouts::zoned::ZonedLayout;
@@ -77,6 +77,8 @@ impl ZonedReader {
     }
 
     /// Get or create the pruning predicate for a given expression.
+    ///
+    /// Returns None if there is no pruning predicate suitable for the expression.
     fn pruning_predicate(&self, expr: ExprRef) -> Option<ExprRef> {
         self.pruning_predicates
             .entry(expr.clone())
@@ -124,7 +126,7 @@ impl ZonedReader {
                         .to_struct()?;
 
                     // SAFETY: This is only fine to call because we perform validation above
-                    Ok(ZoneMap::unchecked_new(zones_array, present_stats))
+                    Ok(ZoneMap::new_unchecked(zones_array, present_stats))
                 }
                 .map_err(Arc::new)
                 .boxed()
@@ -149,11 +151,7 @@ impl ZonedReader {
                     Some(
                         async move {
                             let zone_map = zone_map.await?;
-                            let initial_mask = Mask::try_from(
-                                predicate
-                                    .evaluate(&Scope::new(zone_map.array().to_array()))?
-                                    .as_ref(),
-                            )?;
+                            let initial_mask = zone_map.prune(&predicate)?;
                             Ok(Arc::new(PruningResult {
                                 zone_map,
                                 predicate,
@@ -408,11 +406,7 @@ impl PruningResult {
             "Re-computing pruning mask for version {version} on {}",
             self.predicate
         );
-        let next_mask = Mask::try_from(
-            self.predicate
-                .evaluate(&Scope::new(self.zone_map.array().to_array()))?
-                .as_ref(),
-        )?;
+        let next_mask = self.zone_map.prune(&self.predicate)?;
         *guard = (version, next_mask.clone());
 
         Ok(next_mask)
@@ -496,7 +490,9 @@ mod test {
     ) {
         block_on(async {
             let row_count = layout.row_count();
-            let reader = layout.new_reader("".into(), segments).unwrap();
+            let reader = layout
+                .new_reader("test_stats_pruning_mask".into(), segments)
+                .unwrap();
 
             // Choose a prune-able expression
             let expr = gt(root(), lit(7));

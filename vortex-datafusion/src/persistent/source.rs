@@ -18,7 +18,6 @@ use datafusion::physical_plan::{DisplayFormatType, PhysicalExpr};
 use object_store::ObjectStore;
 use object_store::path::Path;
 use vortex::error::VortexExpect as _;
-use vortex::expr::pruning::pruning_expr;
 use vortex::expr::{ExprRef, VortexExpr, and, root};
 use vortex::file::VORTEX_FILE_EXTENSION;
 use vortex::layout::LayoutReader;
@@ -174,21 +173,18 @@ impl FileSource for VortexSource {
     fn fmt_extra(&self, t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
         match t {
             DisplayFormatType::Default | DisplayFormatType::Verbose => {
-                if let Some(predicate) = &self.predicate {
-                    write!(f, ", predicate={predicate}")?;
-                    if let Some((pruning_predicate, _)) = pruning_expr(predicate) {
-                        writeln!(f, ", pruning_predicate={pruning_predicate}")?;
-                    }
-                };
-                Ok(())
-            }
-            DisplayFormatType::TreeRender => {
-                if let Some(predicate) = &self.predicate {
-                    writeln!(f, "predicate={}", predicate.as_ref())?;
+                if let Some(ref predicate) = self.predicate {
+                    write!(f, ", predicate: {predicate}")?;
                 }
-                Ok(())
+            }
+            // Use TreeRender style key=value formatting to display the predicate
+            DisplayFormatType::TreeRender => {
+                if let Some(ref predicate) = self.predicate {
+                    write!(f, "predicate={predicate}")?;
+                };
             }
         }
+        Ok(())
     }
 
     fn try_pushdown_filters(
