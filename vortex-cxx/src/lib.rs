@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-use std::sync::{LazyLock, OnceLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 
 use arrow_array::RecordBatchReader;
 use arrow_array::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use arrow_array::ffi_stream::{ArrowArrayStreamReader, FFI_ArrowArrayStream};
 use futures::executor::ThreadPool;
 use tokio::runtime::Runtime;
-use vortex::arrow::{FromArrowArray, IntoArrowArray, VortexRecordBatchReader};
+use vortex::ArrayRef;
+use vortex::arrow::{FromArrowArray, IntoArrowArray};
 use vortex::dtype::DType;
 use vortex::dtype::arrow::FromArrowType;
 use vortex::error::{VortexError, VortexExpect};
-use vortex::file::scan::ScanBuilder;
 use vortex::file::{VortexOpenOptions, VortexWriteOptions as WriteOptions};
 use vortex::iter::{ArrayIteratorAdapter, ArrayIteratorExt};
+use vortex::scan::ScanBuilder;
 use vortex::stream::ArrayStream;
-use vortex::{ArrayRef, IntoArray};
 
 /// The tokio runtime for the write-side.
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
@@ -46,14 +46,6 @@ impl Default for ThreadPoolConfig {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Get or initialize the thread pool with the default settings
-fn get_thread_pool() -> &'static ThreadPool {
-    THREAD_POOL.get_or_init(|| {
-        create_thread_pool_with_config(&ThreadPoolConfig::default())
-            .vortex_expect("Cannot start thread pool")
-    })
 }
 
 /// Create a thread pool with the given configuration
@@ -160,21 +152,10 @@ unsafe fn scan_builder_into_arrow(
     out_array: *mut u8,
     out_schema: *mut u8,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let dtype = builder.inner.dtype()?;
-    let iter = ArrayIteratorAdapter::new(
-        dtype.clone(),
-        builder
-            .inner
-            .into_thread_pool_iter(get_thread_pool().clone())?,
-    );
-    let reader = VortexRecordBatchReader::try_new(iter)?;
-
-    let arrays: Vec<_> = reader
-        .map(|batch| batch.map(|b| ArrayRef::from_arrow(b, false)))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let array = vortex::arrays::ChunkedArray::try_new(arrays, dtype)?
-        .into_array()
+    let array = builder
+        .inner
+        .into_array_iter_multithread()?
+        .read_all()?
         .into_arrow_preferred()?;
 
     let ffi_array = FFI_ArrowArray::new(&array.to_data());
@@ -200,14 +181,9 @@ unsafe fn scan_builder_into_stream(
     builder: Box<VortexScanBuilder>,
     out_stream: *mut u8,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let dtype = builder.inner.dtype()?;
-    let iter = ArrayIteratorAdapter::new(
-        dtype,
-        builder
-            .inner
-            .into_thread_pool_iter(get_thread_pool().clone())?,
-    );
-    let reader = VortexRecordBatchReader::try_new(iter)?;
+    let schema = Arc::new(builder.inner.dtype()?.to_arrow_schema()?);
+    let reader = builder.inner.into_record_batch_reader_multithread(schema)?;
+
     let stream = FFI_ArrowArrayStream::new(Box::new(reader));
     let out_stream = out_stream as *mut FFI_ArrowArrayStream;
     // # Safety
