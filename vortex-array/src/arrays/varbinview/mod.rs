@@ -217,6 +217,25 @@ impl BinaryView {
         unsafe { u128::from_le_bytes(self.le_bytes) }
     }
 
+    /// Override the buffer reference with the given buffer_idx, only if this view is not inlined.
+    #[inline(always)]
+    pub fn with_buffer_idx(self, buffer_idx: u32) -> Self {
+        if self.is_inlined() {
+            self
+        } else {
+            // Referencing views must have their buffer_index adjusted with new offsets
+            let view_ref = self.as_view();
+            Self {
+                _ref: Ref::new(
+                    self.len(),
+                    *view_ref.prefix(),
+                    buffer_idx,
+                    view_ref.offset(),
+                ),
+            }
+        }
+    }
+
     /// Shifts the buffer reference by the view by a given offset, useful when merging many
     /// varbinview arrays into one.
     #[inline(always)]
