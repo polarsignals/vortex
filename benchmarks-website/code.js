@@ -2,7 +2,7 @@
 
 // Configuration constants
 const CONFIG = {
-  MOBILE_BREAKPOINT: 768,
+  MOBILE_BREAKPOINT: 1199,
   MOBILE_MAX_DATA_POINTS: 100,
   DEFAULT_VISIBLE_COMMITS: 50,
   DEBOUNCE_DELAY: 50,
@@ -130,10 +130,10 @@ window.initAndRender = (function () {
   // State management
   const state = {
     currentView: "grid",
-    expandedSections: new Set(),
+    expandedSections: new Set(), // Start with all sections collapsed
     activeCategory: "all",
     activeTag: "all",
-    activeEngine: "all",
+    activeEngines: new Set(["all"]), // Changed to Set for multiple selections
     searchTerm: "",
     charts: [],
     chartInstances: new Map(),
@@ -1797,20 +1797,23 @@ window.initAndRender = (function () {
       section.className = "benchmark-set";
       section.setAttribute("data-category", name);
 
+      // Create sticky header container
+      const stickyContainer = document.createElement("div");
+      stickyContainer.className = "sticky-header-container";
+
       // Add header
       const header = this.createSectionHeader(name, benchSet, keptCharts);
-      section.appendChild(header);
+      stickyContainer.appendChild(header);
 
-      // Add description
-      const description = this.getDescription(name);
-      if (description) {
-        const descElem = document.createElement("div");
-        descElem.className = "benchmark-description";
-        descElem.textContent = description;
-        section.appendChild(descElem);
+      // Add controls
+      const controls = this.createSectionControls(name);
+      if (controls) {
+        stickyContainer.appendChild(controls);
       }
 
-      // Add scoring summary for query benchmarks
+      section.appendChild(stickyContainer);
+
+      // Add scoring summary for query benchmarks (after sticky container)
       if (scoring.isQueryBenchmark(name) && benchSet) {
         const scores = scoring.calculateClickBenchScore(benchSet);
         const scoreSummary = scoring.formatScoresSummary(scores);
@@ -1846,15 +1849,16 @@ window.initAndRender = (function () {
         }
       }
 
-      // Add controls
-      const controls = this.createSectionControls(name);
-      if (controls) {
-        section.appendChild(controls);
-      }
-
       // Add charts container
       const chartsContainer = document.createElement("div");
       chartsContainer.className = "benchmark-graphs";
+
+      // Add single-chart class if there's only one chart
+      const chartCount = keptCharts ? keptCharts.length : benchSet?.size || 0;
+      if (chartCount === 1) {
+        chartsContainer.classList.add("single-chart");
+      }
+
       section.appendChild(chartsContainer);
 
       // Collapse by default
@@ -1868,7 +1872,12 @@ window.initAndRender = (function () {
 
       const header = document.createElement("div");
       header.className = "benchmark-header";
-      header.onclick = () => this.toggleSection(name);
+      header.onclick = (e) => {
+        // Don't toggle if clicking on info icon
+        if (!e.target.closest(".info-icon")) {
+          this.toggleSection(name);
+        }
+      };
 
       const titleWrapper = document.createElement("div");
       titleWrapper.className = "title-wrapper";
@@ -1889,6 +1898,16 @@ window.initAndRender = (function () {
 
       titleWrapper.appendChild(title);
       titleWrapper.appendChild(linkBtn);
+
+      // Add info icon with tooltip
+      const description = this.getDescription(name);
+      if (description) {
+        const infoIcon = document.createElement("div");
+        infoIcon.className = "info-icon";
+        infoIcon.innerHTML = "ⓘ";
+        infoIcon.setAttribute("data-tooltip", description);
+        titleWrapper.appendChild(infoIcon);
+      }
 
       const meta = document.createElement("div");
       meta.className = "benchmark-meta";
@@ -1918,7 +1937,7 @@ window.initAndRender = (function () {
           const btn = document.createElement("button");
           btn.className =
             "engine-filter-btn" +
-            (engine === state.activeEngine ? " active" : "");
+            (state.activeEngines.has(engine) ? " active" : "");
           btn.textContent = label;
           btn.setAttribute("data-engine", engine);
           btn.setAttribute("data-category", name);
@@ -1977,26 +1996,49 @@ window.initAndRender = (function () {
     },
 
     filterEngine(categoryName, engine) {
-      state.activeEngine = engine;
-      urlManager.updateParams({ engine });
+      // Handle "all" button specially
+      if (engine === "all") {
+        state.activeEngines.clear();
+        state.activeEngines.add("all");
+      } else {
+        // Remove "all" if selecting specific engine
+        if (state.activeEngines.has("all")) {
+          state.activeEngines.clear();
+        }
+
+        // Toggle the selected engine
+        if (state.activeEngines.has(engine)) {
+          state.activeEngines.delete(engine);
+          // If no engines selected, revert to "all"
+          if (state.activeEngines.size === 0) {
+            state.activeEngines.add("all");
+          }
+        } else {
+          state.activeEngines.add(engine);
+        }
+      }
+
+      // Update URL with comma-separated engines
+      const engineParam = state.activeEngines.has("all")
+        ? "all"
+        : Array.from(state.activeEngines).join(",");
+      urlManager.updateParams({ engine: engineParam });
 
       // Update all engine filter buttons
       document
         .querySelectorAll(".engine-filter-container")
         .forEach((container) => {
           container.querySelectorAll(".engine-filter-btn").forEach((btn) => {
-            btn.classList.toggle(
-              "active",
-              btn.getAttribute("data-engine") === engine
-            );
+            const btnEngine = btn.getAttribute("data-engine");
+            btn.classList.toggle("active", state.activeEngines.has(btnEngine));
           });
         });
 
       // Apply filter to charts
-      this.applyEngineFilter(engine);
+      this.applyEngineFilter();
     },
 
-    applyEngineFilter(engine) {
+    applyEngineFilter() {
       document.querySelectorAll(".benchmark-set").forEach((section) => {
         const category = section.getAttribute("data-category");
         const tags = CATEGORY_TAGS[category] || [];
@@ -2009,19 +2051,25 @@ window.initAndRender = (function () {
             const chartData = state.chartInstances.get(chartKey);
 
             if (chartData?.chart) {
-              this.updateChartVisibility(chartData.chart, engine);
+              this.updateChartVisibility(chartData.chart);
             }
           });
         }
       });
     },
 
-    updateChartVisibility(chart, engine) {
+    updateChartVisibility(chart) {
       const updates = [];
 
       chart.data.datasets.forEach((dataset, index) => {
         const label = dataset.label.toLowerCase();
-        const shouldShow = engine === "all" || label.includes(engine);
+
+        // Check if dataset should be visible based on selected engines
+        const shouldShow =
+          state.activeEngines.has("all") ||
+          Array.from(state.activeEngines).some((engine) =>
+            label.includes(engine)
+          );
 
         if (chart.isDatasetVisible(index) !== shouldShow) {
           updates.push({ index, visible: shouldShow });
@@ -2086,7 +2134,13 @@ window.initAndRender = (function () {
       const params = this.getParams();
 
       state.activeTag = params.tag;
-      state.activeEngine = params.engine;
+
+      // Handle comma-separated engines
+      if (params.engine && params.engine !== "all") {
+        const engines = params.engine.split(",");
+        state.activeEngines.clear();
+        engines.forEach((engine) => state.activeEngines.add(engine.trim()));
+      }
 
       const categoryFilter = domElements.categoryFilter;
       if (categoryFilter) {
@@ -2095,7 +2149,7 @@ window.initAndRender = (function () {
       }
 
       if (params.engine !== "all") {
-        ui.filterEngine(null, params.engine);
+        ui.applyEngineFilter();
       }
 
       if (params.group) {
@@ -2199,20 +2253,18 @@ window.initAndRender = (function () {
     },
 
     focusOnGroup(groupName) {
-      // Collapse all first
-      document.querySelectorAll(".benchmark-set").forEach((section) => {
-        const category = section.getAttribute("data-category");
-        state.expandedSections.delete(category);
-        section.classList.add("collapsed");
-      });
-
-      // Expand target
+      // Find target section
       const targetSection = document.querySelector(
         `[data-category="${groupName}"]`
       );
       if (targetSection) {
-        state.expandedSections.add(groupName);
-        targetSection.classList.remove("collapsed");
+        // Just scroll to the section without expanding it
+        // The user can click to expand if they want to see the charts
+
+        // Close sidebar after navigation on mobile
+        if (utils.isMobile()) {
+          domElements.sidebar.classList.remove("active");
+        }
 
         // Scroll to section
         const targetId = targetSection.querySelector(".benchmark-title").id;
@@ -2318,6 +2370,7 @@ window.initAndRender = (function () {
         "menu-toggle",
         "sidebar",
         "sidebar-close",
+        "sidebar-overlay",
         "expand-all",
         "collapse-all",
         "grid-view",
@@ -2338,6 +2391,14 @@ window.initAndRender = (function () {
         );
         domElements[camelCaseId] = document.getElementById(id);
       });
+
+      // Restore sidebar state on desktop
+      if (window.innerWidth >= 1200) {
+        const isCollapsed = localStorage.getItem("sidebarCollapsed") === "true";
+        if (isCollapsed && domElements.sidebar) {
+          domElements.sidebar.classList.add("collapsed");
+        }
+      }
 
       // Initialize chart observer for lazy loading
       if ("IntersectionObserver" in window) {
@@ -2360,6 +2421,35 @@ window.initAndRender = (function () {
             rootMargin: CONFIG.CHART_OBSERVER_MARGIN,
           }
         );
+
+        // Initialize sticky header observer
+        const stickyObserver = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry) => {
+              const stickyContainer = entry.target.querySelector(
+                ".sticky-header-container"
+              );
+              if (stickyContainer) {
+                if (entry.intersectionRatio < 1) {
+                  stickyContainer.classList.add("is-stuck");
+                } else {
+                  stickyContainer.classList.remove("is-stuck");
+                }
+              }
+            });
+          },
+          {
+            threshold: [1],
+            rootMargin: "-72px 0px 0px 0px", // Adjust based on header height
+          }
+        );
+
+        // Observe all benchmark sets for sticky headers after DOM is ready
+        setTimeout(() => {
+          document.querySelectorAll(".benchmark-set").forEach((set) => {
+            stickyObserver.observe(set);
+          });
+        }, 100);
       }
 
       // Initialize debounced zoom sync
@@ -2406,12 +2496,35 @@ window.initAndRender = (function () {
     },
 
     setupEventListeners() {
-      // Mobile menu
+      // Sidebar toggle (for both mobile and desktop)
       domElements.menuToggle.addEventListener("click", () => {
-        domElements.sidebar.classList.toggle("active");
+        const isDesktop = window.innerWidth >= 1200;
+        if (isDesktop) {
+          // On desktop, toggle collapsed state
+          domElements.sidebar.classList.toggle("collapsed");
+
+          // Save preference to localStorage
+          const isCollapsed =
+            domElements.sidebar.classList.contains("collapsed");
+          localStorage.setItem("sidebarCollapsed", isCollapsed);
+        } else {
+          // On mobile/tablet, toggle active state
+          domElements.sidebar.classList.toggle("active");
+        }
       });
 
       domElements.sidebarClose.addEventListener("click", () => {
+        const isDesktop = window.innerWidth >= 1200;
+        if (isDesktop) {
+          domElements.sidebar.classList.add("collapsed");
+          localStorage.setItem("sidebarCollapsed", true);
+        } else {
+          domElements.sidebar.classList.remove("active");
+        }
+      });
+
+      // Sidebar overlay click (mobile)
+      domElements.sidebarOverlay.addEventListener("click", () => {
         domElements.sidebar.classList.remove("active");
       });
 
@@ -2467,11 +2580,13 @@ window.initAndRender = (function () {
         }
       });
 
-      // Outside click for sidebar
+      // Outside click for sidebar on mobile only
       document.addEventListener("click", (e) => {
         if (
+          utils.isMobile() &&
           !domElements.sidebar.contains(e.target) &&
-          !domElements.menuToggle.contains(e.target)
+          !domElements.menuToggle.contains(e.target) &&
+          domElements.sidebar.classList.contains("active")
         ) {
           domElements.sidebar.classList.remove("active");
         }
@@ -2480,6 +2595,28 @@ window.initAndRender = (function () {
       // Window resize handler
       const debouncedResize = utils.debounce(() => {
         chartManager.updateChartsForResize();
+
+        const isDesktop = window.innerWidth >= 1200;
+        const wasDesktop = state.lastWindowWidth >= 1200;
+
+        // Handle sidebar state when crossing desktop/mobile threshold
+        if (wasDesktop && !isDesktop) {
+          // Moving from desktop to mobile
+          domElements.sidebar.classList.remove("collapsed");
+          domElements.sidebar.classList.remove("active");
+        } else if (!wasDesktop && isDesktop) {
+          // Moving from mobile to desktop
+          domElements.sidebar.classList.remove("active");
+          // Restore saved collapsed state
+          const isCollapsed =
+            localStorage.getItem("sidebarCollapsed") === "true";
+          if (isCollapsed) {
+            domElements.sidebar.classList.add("collapsed");
+          }
+        }
+
+        // Update last window width
+        state.lastWindowWidth = window.innerWidth;
       }, CONFIG.RESIZE_DEBOUNCE);
 
       window.addEventListener("resize", debouncedResize);
@@ -2509,6 +2646,19 @@ window.initAndRender = (function () {
     tocLink.innerHTML = name;
     tocLink.onclick = (e) => {
       e.preventDefault();
+
+      // Auto-expand the section if it's collapsed
+      const targetSection = document.querySelector(`[data-category="${name}"]`);
+      if (targetSection && targetSection.classList.contains("collapsed")) {
+        state.expandedSections.add(name);
+        targetSection.classList.remove("collapsed");
+      }
+
+      // Close sidebar after navigation on mobile
+      if (utils.isMobile()) {
+        domElements.sidebar.classList.remove("active");
+      }
+
       const targetElement = document.getElementById(h1id);
       const headerHeight =
         document.querySelector(".sticky-header").offsetHeight;
