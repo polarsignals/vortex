@@ -54,7 +54,12 @@
     <script src="code.js"></script>
     <script id="main-script">
       initAndRender([
-        ["Random Access", undefined],
+        ["Random Access", {
+          renamedDatasets: {
+            "vortex-tokio-local-disk": "vortex-nvme",
+            "parquet-tokio-local-disk": "parquet-nvme"
+          }
+        }],
         [
           "Compression",
           {
@@ -100,7 +105,7 @@
             renamedDatasets: {
               "DataFusion:vortex-file-compressed": "datafusion:vortex",
               "DataFusion:parquet": "datafusion:parquet",
-              "DataFusion:arrow": "datafusion:arrow",
+              "DataFusion:arrow": "datafusion:in-memory-arrow",
 
               "DuckDB:vortex-file-compressed": "duckdb:vortex",
               "DuckDB:parquet": "duckdb:parquet",
@@ -117,7 +122,7 @@
             renamedDatasets: {
               "DataFusion:vortex-file-compressed": "datafusion:vortex",
               "DataFusion:parquet": "datafusion:parquet",
-              "DataFusion:arrow": "datafusion:arrow",
+              "DataFusion:arrow": "datafusion:in-memory-arrow",
 
               "DuckDB:vortex-file-compressed": "duckdb:vortex",
               "DuckDB:parquet": "duckdb:parquet",
@@ -133,7 +138,7 @@
             renamedDatasets: {
               "DataFusion:vortex-file-compressed": "datafusion:vortex",
               "DataFusion:parquet": "datafusion:parquet",
-              "DataFusion:arrow": "datafusion:arrow",
+              "DataFusion:arrow": "datafusion:in-memory-arrow",
 
               "DuckDB:vortex-file-compressed": "duckdb:vortex",
               "DuckDB:parquet": "duckdb:parquet",
@@ -147,7 +152,7 @@
             renamedDatasets: {
               "DataFusion:vortex-file-compressed": "datafusion:vortex",
               "DataFusion:parquet": "datafusion:parquet",
-              "DataFusion:arrow": "datafusion:arrow",
+              "DataFusion:arrow": "datafusion:in-memory-arrow",
 
               "DuckDB:vortex-file-compressed": "duckdb:vortex",
               "DuckDB:parquet": "duckdb:parquet",
@@ -161,7 +166,7 @@
             renamedDatasets: {
               "DataFusion:vortex-file-compressed": "datafusion:vortex",
               "DataFusion:parquet": "datafusion:parquet",
-              "DataFusion:arrow": "datafusion:arrow",
+              "DataFusion:arrow": "datafusion:in-memory-arrow",
 
               "DuckDB:vortex-file-compressed": "duckdb:vortex",
               "DuckDB:parquet": "duckdb:parquet",
@@ -175,7 +180,7 @@
             renamedDatasets: {
               "DataFusion:vortex-file-compressed": "datafusion:vortex",
               "DataFusion:parquet": "datafusion:parquet",
-              "DataFusion:arrow": "datafusion:arrow",
+              "DataFusion:arrow": "datafusion:in-memory-arrow",
 
               "DuckDB:vortex-file-compressed": "duckdb:vortex",
               "DuckDB:parquet": "duckdb:parquet",
@@ -189,7 +194,7 @@
             renamedDatasets: {
               "DataFusion:vortex-file-compressed": "datafusion:vortex",
               "DataFusion:parquet": "datafusion:parquet",
-              "DataFusion:arrow": "datafusion:arrow",
+              "DataFusion:arrow": "datafusion:in-memory-arrow",
 
               "DuckDB:vortex-file-compressed": "duckdb:vortex",
               "DuckDB:parquet": "duckdb:parquet",
@@ -203,7 +208,7 @@
             renamedDatasets: {
               "DataFusion:vortex-file-compressed": "datafusion:vortex",
               "DataFusion:parquet": "datafusion:parquet",
-              "DataFusion:arrow": "datafusion:arrow",
+              "DataFusion:arrow": "datafusion:in-memory-arrow",
 
               "DuckDB:vortex-file-compressed": "duckdb:vortex",
               "DuckDB:parquet": "duckdb:parquet",
@@ -217,7 +222,7 @@
             renamedDatasets: {
               "DataFusion:vortex-file-compressed": "datafusion:vortex",
               "DataFusion:parquet": "datafusion:parquet",
-              "DataFusion:arrow": "datafusion:arrow",
+              "DataFusion:arrow": "datafusion:in-memory-arrow",
 
               "DuckDB:vortex-file-compressed": "duckdb:vortex",
               "DuckDB:parquet": "duckdb:parquet",

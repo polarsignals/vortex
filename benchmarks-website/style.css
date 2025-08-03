@@ -47,6 +47,7 @@ html {
   background-color: var(--bg-color);
   font-size: 16px;
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 body {
@@ -58,6 +59,8 @@ body {
   padding-top: var(--header-height);
   line-height: 1.6;
   letter-spacing: -0.01em;
+  overflow-x: hidden;
+  position: relative;
 }
 
 /* Sticky Header */
@@ -254,6 +257,8 @@ body {
 .main-container {
   display: flex;
   min-height: calc(100vh - var(--header-height));
+  overflow-x: hidden;
+  width: 100%;
 }
 
 /* Sidebar Navigation */
@@ -505,6 +510,34 @@ body {
   z-index: 1;
 }
 
+/* Remove top margin from first benchmark set */
+.benchmark-set:first-child {
+  margin-top: 0;
+}
+
+/* Prevent layout shift when first section expands */
+.benchmark-set:first-child:not(.collapsed) {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+/* Style for benchmark groups with no data */
+.benchmark-set.no-data {
+  opacity: 0.5;
+}
+
+.benchmark-set.no-data .benchmark-header {
+  cursor: not-allowed;
+}
+
+.benchmark-set.no-data .benchmark-title {
+  color: var(--text-secondary);
+}
+
+.benchmark-set.no-data .collapse-icon {
+  visibility: hidden;
+}
+
 /* Reduce margin on mobile */
 @media (max-width: 768px) {
   .benchmark-set {
@@ -521,6 +554,11 @@ body {
   display: none;
 }
 
+/* Wrapper to maintain space when header becomes sticky */
+.sticky-header-wrapper {
+  position: relative;
+}
+
 /* Headers are not sticky when collapsed */
 .sticky-header-container {
   position: relative;
@@ -528,20 +566,24 @@ body {
   background: var(--bg-secondary);
   /* Maintain border radius at top */
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  margin: 0;
+  padding: 0;
 }
 
-/* Sticky headers only when benchmark group is expanded */
-.benchmark-set:not(.collapsed) .sticky-header-container {
-  position: sticky;
-  top: var(--header-height);
-  /* Add shadow when stuck */
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0);
-  transition: box-shadow 0.2s ease;
-}
+/* Sticky headers only on desktop to avoid mobile layout issues */
+@media (min-width: 769px) {
+  .benchmark-set:not(.collapsed) .sticky-header-container {
+    position: sticky;
+    top: calc(var(--header-height) - 1px);
+    /* Add shadow when stuck */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0);
+    transition: box-shadow 0.2s ease;
+  }
 
-/* Add shadow when the header is stuck (only for expanded groups) */
-.benchmark-set:not(.collapsed) .sticky-header-container.is-stuck {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  /* Add shadow when the header is stuck (only for expanded groups) */
+  .benchmark-set:not(.collapsed) .sticky-header-container.is-stuck {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
 }
 
 
@@ -630,6 +672,13 @@ body {
 
 .benchmark-set.collapsed .collapse-icon {
   transform: rotate(-90deg);
+}
+
+.benchmark-secondary-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 .benchmark-meta {
@@ -1090,12 +1139,25 @@ body {
 
   .benchmark-header {
     padding: 16px;
+    flex-wrap: wrap;
+    gap: 12px;
   }
   
   /* Sticky header handled in the sticky-header-container section above */
 
   .benchmark-title {
     font-size: 1.25rem;
+    flex: 1 1 100%;
+  }
+  
+  .title-wrapper {
+    flex-wrap: wrap;
+    flex: 1 1 100%;
+  }
+  
+  .benchmark-secondary-info {
+    flex: 1 1 100%;
+    margin-top: 8px;
   }
 
   .benchmark-graphs {
@@ -1282,15 +1344,56 @@ code, pre {
   border-bottom: 1px solid var(--border-color);
   padding: 12px 32px;
   margin: 0;
+  /* Ensure no top margin when following sticky container */
+  margin-top: 0 !important;
 }
 
 @media (max-width: 768px) {
   .benchmark-scores-summary {
-    padding: 10px 16px;
+    padding: 8px 16px;
   }
   
   .benchmark-scores-summary .scores-list {
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
+    column-count: 1;
+    gap: 6px;
+  }
+  
+  .benchmark-scores-summary .scores-title {
+    font-size: 11px;
+    margin-bottom: 6px;
+  }
+  
+  .benchmark-scores-summary .score-item {
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    font-size: 12px;
+  }
+  
+  .benchmark-scores-summary .score-rank {
+    font-size: 13px;
+    min-width: 28px;
+  }
+  
+  .benchmark-scores-summary .score-series {
+    font-size: 13px;
+    margin: 0 6px;
+  }
+  
+  .benchmark-scores-summary .score-value {
+    font-size: 12px;
+    padding: 2px 8px;
+  }
+  
+  .benchmark-scores-summary .score-runtime,
+  .benchmark-scores-summary .score-label {
+    font-size: 11px;
+  }
+  
+  .benchmark-scores-summary .scores-explanation {
+    font-size: 11px;
+    margin-top: 6px;
   }
 }
 
@@ -1396,11 +1499,16 @@ code, pre {
   margin: 0 2px;
 }
 
-/* Responsive */
+/* Responsive - consolidated with above mobile styles */
 @media (max-width: 768px) {
-  .benchmark-scores-summary {
-    padding: 16px;
-    margin: 12px 0;
+  .score-item {
+    min-width: 0;
+    width: 100%;
+  }
+  
+  .score-series {
+    flex: 1;
+    min-width: 0;
   }
 }
 

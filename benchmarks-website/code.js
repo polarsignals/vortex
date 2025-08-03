@@ -26,6 +26,7 @@ const CONFIG = {
 // Color mappings for series
 const SERIES_COLOR_MAP = {
   "datafusion:arrow": "#7a27b1",
+  "datafusion:in-memory-arrow": "#7a27b1",
   "datafusion:parquet": "#ef7f1d",
   "datafusion:vortex": "#19a508",
   "duckdb:parquet": "#985113",
@@ -1326,7 +1327,7 @@ window.initAndRender = (function () {
       const explanation = document.createElement("div");
       explanation.className = "scores-explanation";
       explanation.textContent =
-        "Score: geometric mean of query time ratios (lower is better) | Total: sum of all query times";
+        "Score: geometric mean of query time ratio to fastest with 10ms constant shift | Total: sum of all query times (lower is better)";
       summaryDiv.appendChild(explanation);
 
       return summaryDiv;
@@ -1445,7 +1446,7 @@ window.initAndRender = (function () {
       const explanation = document.createElement("div");
       explanation.className = "scores-explanation";
       explanation.textContent =
-        "Latest random access time per series | Ratio to fastest";
+        "Random access time | Ratio to fastest (lower is better)";
       summaryDiv.appendChild(explanation);
 
       return summaryDiv;
@@ -1592,7 +1593,7 @@ window.initAndRender = (function () {
 
       const title = document.createElement("h3");
       title.className = "scores-title";
-      title.textContent = "Compression Performance vs Parquet";
+      title.textContent = "Compression Throughput vs Parquet";
       summaryDiv.appendChild(title);
 
       const metricsList = document.createElement("div");
@@ -1609,7 +1610,6 @@ window.initAndRender = (function () {
             <span class="score-value">${metrics.compressRatio.toFixed(
               2
             )}x</span>
-            <span class="score-label">(${metrics.compressCount} datasets)</span>
           </span>
         `;
         metricsList.appendChild(compressItem);
@@ -1626,9 +1626,6 @@ window.initAndRender = (function () {
             <span class="score-value">${metrics.decompressRatio.toFixed(
               2
             )}x</span>
-            <span class="score-label">(${
-              metrics.decompressCount
-            } datasets)</span>
           </span>
         `;
         metricsList.appendChild(decompressItem);
@@ -1639,7 +1636,7 @@ window.initAndRender = (function () {
       const explanation = document.createElement("div");
       explanation.className = "scores-explanation";
       explanation.textContent =
-        "Geometric mean of Vortex/Parquet ratios across default datasets - higher is better";
+        "Inverse geometric mean of Vortex/Parquet ratios across 9 datasets (higher is better)";
       summaryDiv.appendChild(explanation);
 
       return summaryDiv;
@@ -1735,30 +1732,47 @@ window.initAndRender = (function () {
       const metricsList = document.createElement("div");
       metricsList.className = "scores-list";
 
-      // Size ratio
-      const ratioItem = document.createElement("div");
-      ratioItem.className = "score-item";
-      ratioItem.innerHTML = `
-        <span class="score-rank">📊</span>
-        <span class="score-series">Size Ratio (Vortex/Parquet)</span>
+      // Min ratio
+      const minItem = document.createElement("div");
+      minItem.className = "score-item";
+      minItem.innerHTML = `
+        <span class="score-rank">⬇️</span>
+        <span class="score-series">Min Size Ratio</span>
         <span class="score-metrics">
-          <span class="score-label">Mean:</span>
-          <span class="score-value">${metrics.sizeRatio.toFixed(2)}x</span>
-          <span class="score-label">Min:</span>
           <span class="score-value">${metrics.minRatio.toFixed(2)}x</span>
-          <span class="score-label">Max:</span>
-          <span class="score-value">${metrics.maxRatio.toFixed(2)}x</span>
-          <span class="score-label">(${metrics.sizeRatioCount} datasets)</span>
         </span>
       `;
-      metricsList.appendChild(ratioItem);
+      metricsList.appendChild(minItem);
+
+      // Mean ratio
+      const meanItem = document.createElement("div");
+      meanItem.className = "score-item";
+      meanItem.innerHTML = `
+        <span class="score-rank">📊</span>
+        <span class="score-series">Mean Size Ratio</span>
+        <span class="score-metrics">
+          <span class="score-value">${metrics.sizeRatio.toFixed(2)}x</span>
+        </span>
+      `;
+      metricsList.appendChild(meanItem);
+
+      // Max ratio
+      const maxItem = document.createElement("div");
+      maxItem.className = "score-item";
+      maxItem.innerHTML = `
+        <span class="score-rank">⬆️</span>
+        <span class="score-series">Max Size Ratio</span>
+        <span class="score-metrics">
+          <span class="score-value">${metrics.maxRatio.toFixed(2)}x</span>
+        </span>
+      `;
+      metricsList.appendChild(maxItem);
 
       summaryDiv.appendChild(metricsList);
 
       const explanation = document.createElement("div");
       explanation.className = "scores-explanation";
-      explanation.textContent =
-        "Geometric mean of size ratios (excluding wide tables) - lower is better";
+      explanation.textContent = `Geometric mean of Vortex/Parquet size ratios across ${metrics.sizeRatioCount} datasets (lower is better)`;
       summaryDiv.appendChild(explanation);
 
       return summaryDiv;
@@ -1789,6 +1803,26 @@ window.initAndRender = (function () {
       return BENCHMARK_DESCRIPTIONS[baseCategory] || "";
     },
 
+    benchmarkGroupHasData(benchSet) {
+      if (!benchSet || benchSet.size === 0) return false;
+
+      // Check if any query in the benchmark set has data
+      for (const [queryName, queryData] of benchSet.entries()) {
+        if (!queryData.series || queryData.series.size === 0) continue;
+
+        // Check if any series has any non-null data
+        for (const [seriesName, seriesData] of queryData.series.entries()) {
+          for (let i = 0; i < seriesData.length; i++) {
+            if (seriesData[i] && seriesData[i].value !== null && seriesData[i].value !== undefined) {
+              return true;
+            }
+          }
+        }
+      }
+
+      return false;
+    },
+
     createBenchmarkSection(name, benchSet, groupFilterSettings = {}) {
       const { keptCharts, hiddenDatasets, removedDatasets, renamedDatasets } =
         groupFilterSettings;
@@ -1796,6 +1830,16 @@ window.initAndRender = (function () {
       const section = document.createElement("div");
       section.className = "benchmark-set";
       section.setAttribute("data-category", name);
+
+      // Check if this benchmark group has any data
+      const hasData = this.benchmarkGroupHasData(benchSet);
+      if (!hasData) {
+        section.classList.add("no-data");
+      }
+
+      // Create wrapper for sticky header to maintain space
+      const stickyWrapper = document.createElement("div");
+      stickyWrapper.className = "sticky-header-wrapper";
 
       // Create sticky header container
       const stickyContainer = document.createElement("div");
@@ -1811,7 +1855,8 @@ window.initAndRender = (function () {
         stickyContainer.appendChild(controls);
       }
 
-      section.appendChild(stickyContainer);
+      stickyWrapper.appendChild(stickyContainer);
+      section.appendChild(stickyWrapper);
 
       // Add scoring summary for query benchmarks (after sticky container)
       if (scoring.isQueryBenchmark(name) && benchSet) {
@@ -1872,12 +1917,19 @@ window.initAndRender = (function () {
 
       const header = document.createElement("div");
       header.className = "benchmark-header";
-      header.onclick = (e) => {
-        // Don't toggle if clicking on info icon
-        if (!e.target.closest(".info-icon")) {
-          this.toggleSection(name);
-        }
-      };
+      
+      // Check if the parent section has the no-data class
+      const section = document.querySelector(`[data-category="${name}"]`);
+      const hasNoData = section && section.classList.contains("no-data");
+      
+      if (!hasNoData) {
+        header.onclick = (e) => {
+          // Don't toggle if clicking on info icon
+          if (!e.target.closest(".info-icon")) {
+            this.toggleSection(name);
+          }
+        };
+      }
 
       const titleWrapper = document.createElement("div");
       titleWrapper.className = "title-wrapper";
@@ -1887,6 +1939,10 @@ window.initAndRender = (function () {
       title.className = "benchmark-title";
       title.innerHTML = `<span class="collapse-icon">▼</span> ${name}`;
 
+      // Create a secondary container for link, info, and charts count
+      const secondaryInfo = document.createElement("div");
+      secondaryInfo.className = "benchmark-secondary-info";
+
       const linkBtn = document.createElement("button");
       linkBtn.className = "group-link-btn";
       linkBtn.setAttribute("aria-label", "Copy link to this section");
@@ -1895,9 +1951,7 @@ window.initAndRender = (function () {
         e.stopPropagation();
         this.linkToGroup(name);
       };
-
-      titleWrapper.appendChild(title);
-      titleWrapper.appendChild(linkBtn);
+      secondaryInfo.appendChild(linkBtn);
 
       // Add info icon with tooltip
       const description = this.getDescription(name);
@@ -1906,16 +1960,26 @@ window.initAndRender = (function () {
         infoIcon.className = "info-icon";
         infoIcon.innerHTML = "ⓘ";
         infoIcon.setAttribute("data-tooltip", description);
-        titleWrapper.appendChild(infoIcon);
+        secondaryInfo.appendChild(infoIcon);
       }
 
       const meta = document.createElement("div");
       meta.className = "benchmark-meta";
       const chartCount = keptCharts ? keptCharts.length : benchSet?.size || 0;
-      meta.textContent = `${chartCount} charts`;
+      
+      // Check if the parent section has the no-data class
+      const sectionHasNoData = section && section.classList.contains("no-data");
+      if (sectionHasNoData) {
+        meta.textContent = "No data available";
+      } else {
+        meta.textContent = `${chartCount} charts`;
+      }
+      secondaryInfo.appendChild(meta);
+
+      titleWrapper.appendChild(title);
+      titleWrapper.appendChild(secondaryInfo);
 
       header.appendChild(titleWrapper);
-      header.appendChild(meta);
 
       return header;
     },
@@ -1964,6 +2028,9 @@ window.initAndRender = (function () {
     toggleSection(name) {
       const section = document.querySelector(`[data-category="${name}"]`);
       if (!section) return;
+      
+      // Don't toggle if section has no data
+      if (section.classList.contains("no-data")) return;
 
       if (state.expandedSections.has(name)) {
         state.expandedSections.delete(name);
@@ -2225,6 +2292,9 @@ window.initAndRender = (function () {
       const updates = [];
 
       sections.forEach((section) => {
+        // Skip sections with no data
+        if (section.classList.contains("no-data")) return;
+        
         const category = section.getAttribute("data-category");
         state.expandedSections.add(category);
         if (section.classList.contains("collapsed")) {
@@ -2444,10 +2514,10 @@ window.initAndRender = (function () {
           }
         );
 
-        // Observe all benchmark sets for sticky headers after DOM is ready
+        // Observe all sticky header wrappers after DOM is ready
         setTimeout(() => {
-          document.querySelectorAll(".benchmark-set").forEach((set) => {
-            stickyObserver.observe(set);
+          document.querySelectorAll(".sticky-header-wrapper").forEach((wrapper) => {
+            stickyObserver.observe(wrapper);
           });
         }, 100);
       }
@@ -2647,9 +2717,9 @@ window.initAndRender = (function () {
     tocLink.onclick = (e) => {
       e.preventDefault();
 
-      // Auto-expand the section if it's collapsed
+      // Auto-expand the section if it's collapsed (but not if it has no data)
       const targetSection = document.querySelector(`[data-category="${name}"]`);
-      if (targetSection && targetSection.classList.contains("collapsed")) {
+      if (targetSection && targetSection.classList.contains("collapsed") && !targetSection.classList.contains("no-data")) {
         state.expandedSections.add(name);
         targetSection.classList.remove("collapsed");
       }
