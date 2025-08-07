@@ -6957,6 +6957,7 @@ dependencies = [
  "vortex-dtype",
  "vortex-error",
  "vortex-proto",
+ "vortex-utils",
 ]
 
 [[package]]
