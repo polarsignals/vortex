@@ -38,7 +38,7 @@
 * If you encounter clippy errors in tests that should only pertain to production code (e.g., prohibiting panic/unwrap,
   possible numerical truncation, etc.), then consider allowing those lints at the test module level.
 * Prefer naming test modules `tests`, not `test`.
-  
+
 ## Other
 
 * When summarizing your work, please produce summaries in valid Markdown that can be easily copied/pasted to Github.
