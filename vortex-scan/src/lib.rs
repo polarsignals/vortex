@@ -327,3 +327,6 @@ fn filter_and_projection_masks(
 fn to_field_mask(field: FieldName) -> FieldMask {
     FieldMask::Prefix(FieldPath::from(Field::Name(field)))
 }
+
+#[cfg(test)]
+mod tests;
