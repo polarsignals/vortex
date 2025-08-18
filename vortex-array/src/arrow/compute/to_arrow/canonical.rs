@@ -45,6 +45,9 @@ impl Kernel for ToArrowCanonical {
             return Ok(None);
         }
 
+        // Track whether the original arrow_type was None (preferred type)
+        let use_preferred_type = arrow_type.is_none();
+
         // Figure out the target Arrow type, or use the canonical type
         let arrow_type = arrow_type
             .cloned()
@@ -136,11 +139,25 @@ impl Kernel for ToArrowCanonical {
                 to_arrow_decimal256(array)
             }
             (Canonical::Struct(array), DataType::Struct(fields)) => {
-                to_arrow_struct(array, fields.as_ref())
+                if use_preferred_type {
+                    to_arrow_struct(array, None)
+                } else {
+                    to_arrow_struct(array, Some(fields.as_ref()))
+                }
             }
-            (Canonical::List(array), DataType::List(field)) => to_arrow_list::<i32>(array, field),
+            (Canonical::List(array), DataType::List(field)) => {
+                if use_preferred_type {
+                    to_arrow_list::<i32>(array, None)
+                } else {
+                    to_arrow_list::<i32>(array, Some(field))
+                }
+            }
             (Canonical::List(array), DataType::LargeList(field)) => {
-                to_arrow_list::<i64>(array, field)
+                if use_preferred_type {
+                    to_arrow_list::<i64>(array, None)
+                } else {
+                    to_arrow_list::<i64>(array, Some(field))
+                }
             }
             (Canonical::VarBinView(array), DataType::BinaryView) if array.dtype().is_binary() => {
                 to_arrow_varbinview::<BinaryViewType>(array)
@@ -277,8 +294,12 @@ fn to_arrow_decimal256(array: DecimalArray) -> VortexResult<ArrowArrayRef> {
     ))
 }
 
-fn to_arrow_struct(array: StructArray, fields: &[FieldRef]) -> VortexResult<ArrowArrayRef> {
-    if array.fields().len() != fields.len() {
+/// to_arrow_struct converts the given struct array to an arrow struct array. If
+/// fields is None, the fields are converted to the preferred arrow type.
+fn to_arrow_struct(array: StructArray, fields: Option<&[FieldRef]>) -> VortexResult<ArrowArrayRef> {
+    if let Some(fields) = fields
+        && array.fields().len() != fields.len()
+    {
         vortex_bail!(
             "StructArray has {} fields, but target Arrow type has {} fields",
             array.fields().len(),
@@ -286,26 +307,40 @@ fn to_arrow_struct(array: StructArray, fields: &[FieldRef]) -> VortexResult<Arro
         );
     }
 
-    let field_arrays = fields
-        .iter()
-        .zip_eq(array.fields())
-        .map(|(field, arr)| {
-            // We check that the Vortex array nullability is compatible with the field
-            // nullability. In other words, make sure we don't return any nulls for a
-            // non-nullable field.
-            if arr.dtype().is_nullable() && !field.is_nullable() && !arr.all_valid()? {
-                vortex_bail!(
-                    "Field {} is non-nullable but has nulls {}",
-                    field,
-                    arr.display_tree()
-                );
-            }
+    let field_arrays = if let Some(fields) = fields {
+        // Use specified field types
+        fields
+            .iter()
+            .zip_eq(array.fields())
+            .map(|(field, arr)| {
+                // We check that the Vortex array nullability is compatible with the field
+                // nullability. In other words, make sure we don't return any nulls for a
+                // non-nullable field.
+                if arr.dtype().is_nullable() && !field.is_nullable() && !arr.all_valid()? {
+                    vortex_bail!(
+                        "Field {} is non-nullable but has nulls {}",
+                        field,
+                        arr.display_tree()
+                    );
+                }
 
-            arr.clone()
-                .into_arrow(field.data_type())
-                .map_err(|err| err.with_context(format!("Failed to canonicalize field {field}")))
-        })
-        .collect::<VortexResult<Vec<_>>>()?;
+                arr.clone().into_arrow(field.data_type()).map_err(|err| {
+                    err.with_context(format!("Failed to canonicalize field {field}"))
+                })
+            })
+            .collect::<VortexResult<Vec<_>>>()?
+    } else {
+        // Use preferred type for each field
+        array
+            .fields()
+            .iter()
+            .map(|arr| {
+                arr.clone().into_arrow_preferred().map_err(|err| {
+                    err.with_context("Failed to canonicalize field to preferred type")
+                })
+            })
+            .collect::<VortexResult<Vec<_>>>()?
+    };
 
     let nulls = array.validity_mask()?.to_null_buffer();
 
@@ -316,20 +351,39 @@ fn to_arrow_struct(array: StructArray, fields: &[FieldRef]) -> VortexResult<Arro
         )));
     }
 
-    let arrow_fields = array
-        .names()
-        .iter()
-        .zip(field_arrays.iter())
-        .zip(fields.iter())
-        .map(|((name, field_array), target_field)| {
-            Field::new(
-                &**name,
-                field_array.data_type().clone(),
-                target_field.is_nullable(),
-            )
-        })
-        .map(Arc::new)
-        .collect::<Fields>();
+    let arrow_fields = if let Some(fields) = fields {
+        // Use provided field metadata
+        array
+            .names()
+            .iter()
+            .zip(field_arrays.iter())
+            .zip(fields.iter())
+            .map(|((name, field_array), target_field)| {
+                Field::new(
+                    &**name,
+                    field_array.data_type().clone(),
+                    target_field.is_nullable(),
+                )
+            })
+            .map(Arc::new)
+            .collect::<Fields>()
+    } else {
+        // Derive from arrays themselves
+        array
+            .names()
+            .iter()
+            .zip(field_arrays.iter())
+            .zip(array.fields())
+            .map(|((name, field_array), arr)| {
+                Field::new(
+                    &**name,
+                    field_array.data_type().clone(),
+                    arr.dtype().is_nullable(),
+                )
+            })
+            .map(Arc::new)
+            .collect::<Fields>()
+    };
 
     Ok(Arc::new(ArrowStructArray::try_new(
         arrow_fields,
@@ -340,7 +394,7 @@ fn to_arrow_struct(array: StructArray, fields: &[FieldRef]) -> VortexResult<Arro
 
 fn to_arrow_list<O: NativePType + OffsetSizeTrait>(
     array: ListArray,
-    element: &FieldRef,
+    element: Option<&FieldRef>,
 ) -> VortexResult<ArrowArrayRef> {
     // First we cast the offsets into the correct width.
     let offsets_dtype = DType::Primitive(O::PTYPE, array.dtype().nullability());
@@ -348,11 +402,29 @@ fn to_arrow_list<O: NativePType + OffsetSizeTrait>(
         .map_err(|err| err.with_context(format!("Failed to cast offsets to {offsets_dtype}")))?
         .to_primitive()?;
 
-    let values = array.elements().clone().into_arrow(element.data_type())?;
+    let values = if let Some(element) = element {
+        // Use specified element type
+        array.elements().clone().into_arrow(element.data_type())?
+    } else {
+        // Use preferred type for elements
+        array.elements().clone().into_arrow_preferred()?
+    };
     let nulls = array.validity_mask()?.to_null_buffer();
 
+    let element_field = if let Some(element) = element {
+        // Use provided element field
+        element.clone()
+    } else {
+        // Create element field from the converted values
+        Arc::new(Field::new(
+            "item",
+            values.data_type().clone(),
+            array.elements().dtype().is_nullable(),
+        ))
+    };
+
     Ok(Arc::new(GenericListArray::new(
-        element.clone(),
+        element_field,
         arrow_offsets.buffer::<O>().into_arrow_offset_buffer(),
         values,
         nulls,
