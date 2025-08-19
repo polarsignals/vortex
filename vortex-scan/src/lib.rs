@@ -276,7 +276,7 @@ impl ScanBuilder<ArrayRef> {
         ))
     }
 
-    /// Returns an [`ArrayStream`] with tasks spawned onto the current Tokio runtime.
+    /// Returns an `ArrayStream` with tasks spawned onto the current Tokio runtime.
     ///
     /// See [`ScanBuilder::into_tokio_stream`] for more details.
     ///
@@ -299,7 +299,7 @@ fn filter_and_projection_masks(
     filter: Option<&ExprRef>,
     dtype: &DType,
 ) -> VortexResult<(Vec<FieldMask>, Vec<FieldMask>)> {
-    let Some(struct_dtype) = dtype.as_struct() else {
+    let Some(struct_dtype) = dtype.as_struct_opt() else {
         return Ok(match filter {
             Some(_) => (vec![FieldMask::All], vec![FieldMask::All]),
             None => (Vec::new(), vec![FieldMask::All]),

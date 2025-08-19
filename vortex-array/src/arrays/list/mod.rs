@@ -6,16 +6,17 @@ mod serde;
 
 use std::sync::Arc;
 
+#[cfg(feature = "test-harness")]
 use itertools::Itertools;
-use num_traits::{AsPrimitive, PrimInt};
-use vortex_dtype::{DType, NativePType, match_each_native_ptype};
-use vortex_error::{VortexResult, VortexUnwrap, vortex_bail};
+use num_traits::{AsPrimitive, NumCast, PrimInt};
+use vortex_dtype::{DType, NativePType, match_each_integer_ptype, match_each_native_ptype};
+use vortex_error::{VortexExpect, VortexResult, vortex_bail, vortex_ensure};
 use vortex_scalar::Scalar;
 
 use crate::arrays::PrimitiveVTable;
 #[cfg(feature = "test-harness")]
 use crate::builders::{ArrayBuilder, ListBuilder};
-use crate::compute::sub_scalar;
+use crate::compute::{min_max, sub_scalar};
 use crate::stats::{ArrayStats, StatsSetRef};
 use crate::validity::Validity;
 use crate::vtable::{
@@ -93,10 +94,10 @@ impl VTable for ListVTable {
 /// assert_eq!(list_array.len(), 3);
 ///
 /// // Access individual lists
-/// let first_list = list_array.elements_at(0).unwrap();
+/// let first_list = list_array.elements_at(0);
 /// assert_eq!(first_list.len(), 2); // [1, 2]
 ///
-/// let third_list = list_array.elements_at(2).unwrap();
+/// let third_list = list_array.elements_at(2);
 /// assert!(third_list.is_empty()); // []
 /// ```
 #[derive(Clone, Debug)]
@@ -124,6 +125,77 @@ impl<T> OffsetPType for T where T: NativePType + PrimInt + AsPrimitive<usize> + 
 // - The size of the validity is the size-1 of the offset array
 
 impl ListArray {
+    fn validate(
+        elements: &dyn Array,
+        offsets: &dyn Array,
+        validity: &Validity,
+    ) -> VortexResult<()> {
+        // Offsets must be of integer type, and cannot go lower than 0.
+        vortex_ensure!(
+            offsets.dtype().is_int() && !offsets.dtype().is_nullable(),
+            "offsets have invalid type {}",
+            offsets.dtype()
+        );
+
+        // We can safely unwrap the DType as primitive now
+        let offsets_ptype = offsets.dtype().as_ptype();
+
+        // Offsets must be sorted (but not strictly sorted, zero-length lists are allowed)
+        if let Some(is_sorted) = offsets.statistics().compute_is_sorted() {
+            vortex_ensure!(is_sorted, "offsets must be sorted");
+        } else {
+            vortex_bail!("offsets must report is_sorted statistic");
+        }
+
+        // Validate that offsets min is non-negative, and max does not exceed the length of
+        // the elements array.
+        if let Some(min_max) = min_max(offsets)? {
+            match_each_integer_ptype!(offsets_ptype, |P| {
+                let max_offset = <P as NumCast>::from(elements.len()).unwrap_or(P::MAX);
+
+                #[allow(clippy::absurd_extreme_comparisons, unused_comparisons)]
+                {
+                    if let Some(min) = min_max.min.as_primitive().as_::<P>() {
+                        vortex_ensure!(
+                            min >= 0 && min <= max_offset,
+                            "offsets minimum {min} outside valid range [0, {max_offset}]"
+                        );
+                    }
+
+                    if let Some(max) = min_max.max.as_primitive().as_::<P>() {
+                        vortex_ensure!(
+                            max >= 0 && max <= max_offset,
+                            "offsets maximum {max} outside valid range [0, {max_offset}]"
+                        )
+                    }
+                }
+            })
+        } else {
+            // TODO(aduffy): fallback to slower validation pathway?
+            vortex_bail!(
+                "offsets array with encoding {} must support min_max compute function",
+                offsets.encoding_id()
+            );
+        };
+
+        // If a validity array is present, it must be the same length as the ListArray
+        if let Some(validity_len) = validity.maybe_len() {
+            vortex_ensure!(
+                validity_len == offsets.len() - 1,
+                "validity with size {validity_len} does not match array size {}",
+                offsets.len() - 1
+            );
+        }
+
+        Ok(())
+    }
+}
+
+impl ListArray {
+    pub fn new(elements: ArrayRef, offsets: ArrayRef, validity: Validity) -> Self {
+        Self::try_new(elements, offsets, validity).vortex_expect("ListArray new")
+    }
+
     pub fn try_new(
         elements: ArrayRef,
         offsets: ArrayRef,
@@ -141,6 +213,8 @@ impl ListArray {
         if offsets.is_empty() {
             vortex_bail!("Offsets must have at least one element, [0] for an empty list");
         }
+
+        Self::validate(&elements, &offsets, &validity)?;
 
         Ok(Self {
             dtype: DType::List(Arc::new(elements.dtype().clone()), nullability),
@@ -163,28 +237,25 @@ impl ListArray {
 
         self.offsets()
             .as_opt::<PrimitiveVTable>()
-            .map(|p| {
-                Ok(match_each_native_ptype!(p.ptype(), |P| {
-                    p.as_slice::<P>()[index].as_()
-                }))
-            })
+            .map(|p| match_each_native_ptype!(p.ptype(), |P| { p.as_slice::<P>()[index].as_() }))
             .unwrap_or_else(|| {
                 self.offsets()
                     .scalar_at(index)
-                    .and_then(|s| usize::try_from(&s))
+                    .as_primitive()
+                    .as_::<usize>()
+                    .vortex_expect("index must fit in usize")
             })
-            .vortex_unwrap()
     }
 
     /// Returns the elements at the given index from the list array.
-    pub fn elements_at(&self, index: usize) -> VortexResult<ArrayRef> {
+    pub fn elements_at(&self, index: usize) -> ArrayRef {
         let start = self.offset_at(index);
         let end = self.offset_at(index + 1);
         self.elements().slice(start, end)
     }
 
     /// Returns elements of the list array referenced by the offsets array
-    pub fn sliced_elements(&self) -> VortexResult<ArrayRef> {
+    pub fn sliced_elements(&self) -> ArrayRef {
         let start = self.offset_at(0);
         let end = self.offset_at(self.len());
         self.elements().slice(start, end)
@@ -202,9 +273,9 @@ impl ListArray {
 
     /// Create a copy of this array by adjusting offsets to start at 0 and removing elements not referenced by the offsets
     pub fn reset_offsets(&self) -> VortexResult<Self> {
-        let elements = self.sliced_elements()?;
+        let elements = self.sliced_elements();
         let offsets = self.offsets();
-        let first_offset = offsets.scalar_at(0)?;
+        let first_offset = offsets.scalar_at(0);
         let adjusted_offsets = sub_scalar(offsets, first_offset)?;
 
         Self::try_new(elements, adjusted_offsets, self.validity.clone())
@@ -226,24 +297,24 @@ impl ArrayVTable<ListVTable> for ListVTable {
 }
 
 impl OperationsVTable<ListVTable> for ListVTable {
-    fn slice(array: &ListArray, start: usize, stop: usize) -> VortexResult<ArrayRef> {
-        Ok(ListArray::try_new(
+    fn slice(array: &ListArray, start: usize, stop: usize) -> ArrayRef {
+        ListArray::new(
             array.elements().clone(),
-            array.offsets().slice(start, stop + 1)?,
-            array.validity().slice(start, stop)?,
-        )?
-        .into_array())
+            array.offsets().slice(start, stop + 1),
+            array.validity().slice(start, stop),
+        )
+        .into_array()
     }
 
-    fn scalar_at(array: &ListArray, index: usize) -> VortexResult<Scalar> {
-        let elem = array.elements_at(index)?;
-        let scalars: Vec<Scalar> = (0..elem.len()).map(|i| elem.scalar_at(i)).try_collect()?;
+    fn scalar_at(array: &ListArray, index: usize) -> Scalar {
+        let elem = array.elements_at(index);
+        let scalars: Vec<Scalar> = (0..elem.len()).map(|i| elem.scalar_at(i)).collect();
 
-        Ok(Scalar::list(
+        Scalar::list(
             Arc::new(elem.dtype().clone()),
             scalars,
             array.dtype().nullability(),
-        ))
+        )
     }
 }
 
@@ -366,7 +437,7 @@ mod test {
                 vec![1.into(), 2.into()],
                 Nullability::Nullable
             ),
-            list.scalar_at(0).unwrap()
+            list.scalar_at(0)
         );
         assert_eq!(
             Scalar::list(
@@ -374,11 +445,11 @@ mod test {
                 vec![3.into(), 4.into()],
                 Nullability::Nullable
             ),
-            list.scalar_at(1).unwrap()
+            list.scalar_at(1)
         );
         assert_eq!(
             Scalar::list(Arc::new(I32.into()), vec![5.into()], Nullability::Nullable),
-            list.scalar_at(2).unwrap()
+            list.scalar_at(2)
         );
     }
 
@@ -396,14 +467,8 @@ mod test {
                 .unwrap();
 
         assert_eq!(list.len(), list_from_iter.len());
-        assert_eq!(
-            list.scalar_at(0).unwrap(),
-            list_from_iter.scalar_at(0).unwrap()
-        );
-        assert_eq!(
-            list.scalar_at(1).unwrap(),
-            list_from_iter.scalar_at(1).unwrap()
-        );
+        assert_eq!(list.scalar_at(0), list_from_iter.scalar_at(0));
+        assert_eq!(list.scalar_at(1), list_from_iter.scalar_at(1));
     }
 
     #[test]
@@ -478,11 +543,11 @@ mod test {
                 .as_list(),
             )
             .vortex_unwrap();
-        let list = builder.finish().slice(2, 4).vortex_unwrap();
+        let list = builder.finish().slice(2, 4);
         let list = list.as_::<ListVTable>().reset_offsets().unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list.offsets().len(), 3);
         assert_eq!(list.elements().len(), 6);
-        assert_eq!(list.offsets().scalar_at(0).unwrap(), 0u32.into());
+        assert_eq!(list.offsets().scalar_at(0), 0u32.into());
     }
 }
