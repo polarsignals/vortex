@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use arrow_array::types::{
-    Date32Type, Date64Type, Time32MillisecondType, Time32SecondType, Time64MicrosecondType,
-    Time64NanosecondType, TimestampMicrosecondType, TimestampMillisecondType,
-    TimestampNanosecondType, TimestampSecondType,
+    ArrowTimestampType, Date32Type, Date64Type, Time32MillisecondType, Time32SecondType,
+    Time64MicrosecondType, Time64NanosecondType, TimestampMicrosecondType,
+    TimestampMillisecondType, TimestampNanosecondType, TimestampSecondType,
 };
 use arrow_array::{
     ArrayRef as ArrowArrayRef, ArrowPrimitiveType, PrimitiveArray as ArrowPrimitiveArray,
@@ -70,20 +70,20 @@ impl Kernel for ToArrowTemporal {
             }
             (
                 TemporalMetadata::Timestamp(TimeUnit::S, _),
-                DataType::Timestamp(ArrowTimeUnit::Second, None),
-            ) => to_arrow_temporal::<TimestampSecondType>(&array),
+                DataType::Timestamp(ArrowTimeUnit::Second, arrow_tz),
+            ) => to_arrow_timestamp::<TimestampSecondType>(&array, arrow_tz),
             (
                 TemporalMetadata::Timestamp(TimeUnit::Ms, _),
-                DataType::Timestamp(ArrowTimeUnit::Millisecond, None),
-            ) => to_arrow_temporal::<TimestampMillisecondType>(&array),
+                DataType::Timestamp(ArrowTimeUnit::Millisecond, arrow_tz),
+            ) => to_arrow_timestamp::<TimestampMillisecondType>(&array, arrow_tz),
             (
                 TemporalMetadata::Timestamp(TimeUnit::Us, _),
-                DataType::Timestamp(ArrowTimeUnit::Microsecond, None),
-            ) => to_arrow_temporal::<TimestampMicrosecondType>(&array),
+                DataType::Timestamp(ArrowTimeUnit::Microsecond, arrow_tz),
+            ) => to_arrow_timestamp::<TimestampMicrosecondType>(&array, arrow_tz),
             (
                 TemporalMetadata::Timestamp(TimeUnit::Ns, _),
-                DataType::Timestamp(ArrowTimeUnit::Nanosecond, None),
-            ) => to_arrow_temporal::<TimestampNanosecondType>(&array),
+                DataType::Timestamp(ArrowTimeUnit::Nanosecond, arrow_tz),
+            ) => to_arrow_timestamp::<TimestampNanosecondType>(&array, arrow_tz),
             _ => vortex_bail!(
                 "Cannot convert {} array to Arrow type {}",
                 array.dtype(),
@@ -111,4 +111,25 @@ where
     let nulls = array.temporal_values().validity_mask()?.to_null_buffer();
 
     Ok(Arc::new(ArrowPrimitiveArray::<T>::new(values, nulls)))
+}
+
+fn to_arrow_timestamp<T: ArrowTimestampType>(
+    array: &TemporalArray,
+    arrow_tz: &Option<Arc<str>>,
+) -> VortexResult<ArrowArrayRef>
+where
+    T::Native: NativePType,
+{
+    let values_dtype = DType::Primitive(T::Native::PTYPE, array.dtype().nullability());
+    let values = cast(array.temporal_values(), &values_dtype)?
+        .to_primitive()?
+        .into_buffer()
+        .into_arrow_scalar_buffer();
+    let nulls = array.temporal_values().validity_mask()?.to_null_buffer();
+
+    let mut arrow_array = ArrowPrimitiveArray::<T>::new(values, nulls);
+    if let Some(tz) = arrow_tz {
+        arrow_array = arrow_array.with_timezone(tz.as_ref());
+    }
+    Ok(Arc::new(arrow_array))
 }
