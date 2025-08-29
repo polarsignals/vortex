@@ -114,6 +114,7 @@ impl Validity {
         }
     }
 
+    // TODO(connor): Make this not return a `VortexResult`.
     /// Returns whether the `index` item is valid.
     #[inline]
     pub fn is_valid(&self, index: usize) -> bool {
