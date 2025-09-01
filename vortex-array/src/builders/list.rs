@@ -12,8 +12,8 @@ use vortex_scalar::ListScalar;
 
 use crate::arrays::{ListArray, OffsetPType};
 use crate::builders::{
-    ArrayBuilder, ArrayBuilderExt, DEFAULT_BUILDER_CAPACITY, LazyNullBufferBuilder,
-    PrimitiveBuilder, builder_with_capacity,
+    ArrayBuilder, DEFAULT_BUILDER_CAPACITY, LazyNullBufferBuilder, PrimitiveBuilder,
+    builder_with_capacity,
 };
 use crate::compute::{add_scalar, cast, sub_scalar};
 use crate::{Array, ArrayRef, IntoArray, ToCanonical};
@@ -164,7 +164,7 @@ impl<O: OffsetPType> ArrayBuilder for ListBuilder<O> {
         self.nulls.append_n_non_nulls(n);
     }
 
-    fn append_nulls(&mut self, n: usize) {
+    unsafe fn append_nulls_unchecked(&mut self, n: usize) {
         let count = self.value_builder.len();
         for _ in 0..n {
             // A list with a null element is can be a list with a zero-span offset and a validity
@@ -176,15 +176,7 @@ impl<O: OffsetPType> ArrayBuilder for ListBuilder<O> {
         self.nulls.append_n_nulls(n);
     }
 
-    fn extend_from_array(&mut self, array: &dyn Array) -> VortexResult<()> {
-        if !self.dtype.eq_with_nullability_superset(array.dtype()) {
-            vortex_bail!(
-                "tried to extend a builder with `DType` {} with an array with `DType {}",
-                self.dtype,
-                array.dtype()
-            );
-        }
-
+    unsafe fn extend_from_array_unchecked(&mut self, array: &dyn Array) -> VortexResult<()> {
         let list = array.to_list()?;
         if list.is_empty() {
             return Ok(());

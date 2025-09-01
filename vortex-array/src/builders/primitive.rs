@@ -52,7 +52,7 @@ impl<T: NativePType> PrimitiveBuilder<T> {
     /// # Panics
     ///
     /// This method will panic if the input is `None` and the builder is non-nullable.
-    pub fn append_option(&mut self, value: Option<T>) {
+    pub(crate) fn append_option(&mut self, value: Option<T>) {
         match value {
             Some(value) => self.append_value(value),
             None => self.append_null(),
@@ -144,20 +144,12 @@ impl<T: NativePType> ArrayBuilder for PrimitiveBuilder<T> {
         self.nulls.append_n_non_nulls(n);
     }
 
-    fn append_nulls(&mut self, n: usize) {
+    unsafe fn append_nulls_unchecked(&mut self, n: usize) {
         self.values.push_n(T::default(), n);
         self.nulls.append_n_nulls(n);
     }
 
-    fn extend_from_array(&mut self, array: &dyn Array) -> VortexResult<()> {
-        if !self.dtype.eq_with_nullability_superset(array.dtype()) {
-            vortex_bail!(
-                "tried to extend a builder with `DType` {} with an array with `DType {}",
-                self.dtype,
-                array.dtype()
-            );
-        }
-
+    unsafe fn extend_from_array_unchecked(&mut self, array: &dyn Array) -> VortexResult<()> {
         let array = array.to_primitive()?;
         if array.ptype() != T::PTYPE {
             vortex_bail!("Cannot extend from array with different ptype");

@@ -11,8 +11,7 @@ use vortex_scalar::ListScalar;
 
 use crate::arrays::FixedSizeListArray;
 use crate::builders::{
-    ArrayBuilder, ArrayBuilderExt, DEFAULT_BUILDER_CAPACITY, LazyNullBufferBuilder,
-    builder_with_capacity,
+    ArrayBuilder, DEFAULT_BUILDER_CAPACITY, LazyNullBufferBuilder, builder_with_capacity,
 };
 use crate::{Array, ArrayRef, IntoArray, ToCanonical};
 
@@ -175,35 +174,22 @@ impl ArrayBuilder for FixedSizeListBuilder {
 
     /// We define the null value of a fixed-size list of size `m` to be a list of `m` placeholder values.
     ///
-    /// We append `n * m` placeholder values to the underlying `elements` array.
-    ///
-    /// The placeholder values depend on the nullability of the element type:
-    /// - If elements are nullable, we use null values
-    /// - If elements are non-nullable, we use zero values
-    fn append_nulls(&mut self, n: usize) {
+    /// We append `n * m` default values to the underlying `elements` array.
+    unsafe fn append_nulls_unchecked(&mut self, n: usize) {
+        assert!(
+            self.dtype.is_nullable(),
+            "tried to append {n} nulls to a non-nullable array builder"
+        );
+
         let element_count = n * self.list_size() as usize;
 
-        // TODO(connor): `append_default()`
-        if self.element_dtype().is_nullable() {
-            self.elements_builder.append_nulls(element_count);
-        } else {
-            self.elements_builder.append_zeros(element_count);
-        }
-
+        self.elements_builder.append_defaults(element_count);
         self.nulls.append_n_nulls(n);
     }
 
     /// This will increase the capacity if extending with this `array` would go past the original
     /// capacity.
-    fn extend_from_array(&mut self, array: &dyn Array) -> VortexResult<()> {
-        if !self.dtype.eq_with_nullability_superset(array.dtype()) {
-            vortex_bail!(
-                "tried to extend a builder with `DType` {} with an array with `DType {}",
-                self.dtype,
-                array.dtype()
-            );
-        }
-
+    unsafe fn extend_from_array_unchecked(&mut self, array: &dyn Array) -> VortexResult<()> {
         let fsl = array.to_fixed_size_list()?;
         if fsl.is_empty() {
             return Ok(());
