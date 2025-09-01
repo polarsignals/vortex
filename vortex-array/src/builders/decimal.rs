@@ -10,11 +10,10 @@ use vortex_mask::Mask;
 use vortex_scalar::{BigCast, NativeDecimalType, i256, match_each_decimal_value_type};
 
 use crate::arrays::DecimalArray;
-use crate::builders::lazy_validity_builder::LazyNullBufferBuilder;
-use crate::builders::{ArrayBuilder, DEFAULT_BUILDER_CAPACITY};
+use crate::builders::{ArrayBuilder, DEFAULT_BUILDER_CAPACITY, LazyNullBufferBuilder};
 use crate::{Array, ArrayRef, IntoArray, ToCanonical};
 
-/// An [`ArrayBuilder`] for `Decimal` typed arrays.
+/// The builder for building a [`DecimalArray`].
 ///
 /// The output will be a new [`DecimalArray`] holding values of `T`. Any value that is a valid
 /// [decimal type][NativeDecimalType] can be appended to the builder and it will be immediately
@@ -108,18 +107,6 @@ impl DecimalBuilder {
         self.nulls.append_non_null();
     }
 
-    /// Appends an optional decimal (representing a nullable decimal) to the builder.
-    ///
-    /// # Panics
-    ///
-    /// This method will panic if the input is `None` and the builder is non-nullable.
-    pub fn append_option<V: NativeDecimalType>(&mut self, value: Option<V>) {
-        match value {
-            Some(value) => self.append_value(value),
-            None => self.append_null(),
-        }
-    }
-
     /// Finishes the builder directly into a [`DecimalArray`].
     pub fn finish_into_decimal(&mut self) -> DecimalArray {
         let validity = self.nulls.finish_with_nullability(self.dtype.nullability());
@@ -177,7 +164,9 @@ impl ArrayBuilder for DecimalBuilder {
             );
         }
 
-        let decimal_array = array.to_decimal()?;
+        let decimal_array = array
+            .to_decimal()
+            .vortex_expect("we checked that the array had `DType::Decimal`");
 
         match_each_decimal_value_type!(decimal_array.values_type(), |D| {
             // Extends the values buffer from another buffer of type D where D can be coerced to the
