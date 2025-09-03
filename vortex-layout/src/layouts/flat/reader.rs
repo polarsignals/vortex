@@ -8,6 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::FutureExt;
 use vortex_array::compute::filter;
+use vortex_array::pipeline::operators::MaskFuture;
 use vortex_array::pipeline::{
     N, export_canonical_pipeline_expr, export_canonical_pipeline_expr_offset,
 };
@@ -23,8 +24,7 @@ use crate::layouts::SharedArrayFuture;
 use crate::layouts::flat::FlatLayout;
 use crate::segments::SegmentSource;
 use crate::{
-    ArrayEvaluation, LayoutReader, MaskEvaluation, MaskFuture, NoOpPruningEvaluation,
-    PruningEvaluation,
+    ArrayEvaluation, LayoutReader, MaskEvaluation, NoOpPruningEvaluation, PruningEvaluation,
 };
 
 /// The threshold of mask density below which we will evaluate the expression only over the
@@ -296,6 +296,7 @@ mod test {
     use futures::executor::block_on;
     use futures::stream;
     use vortex_array::arrays::PrimitiveArray;
+    use vortex_array::pipeline::operators::MaskFuture;
     use vortex_array::validity::Validity;
     use vortex_array::{ArrayContext, ToCanonical};
     use vortex_buffer::buffer;
@@ -304,7 +305,7 @@ mod test {
     use crate::layouts::flat::writer::FlatLayoutStrategy;
     use crate::segments::{SegmentSource, SequenceWriter, TestSegments};
     use crate::sequence::SequenceId;
-    use crate::{LayoutStrategy as _, MaskFuture, SequentialStreamAdapter, SequentialStreamExt};
+    use crate::{LayoutStrategy as _, SequentialStreamAdapter, SequentialStreamExt};
 
     #[test]
     fn flat_identity() {

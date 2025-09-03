@@ -11,9 +11,10 @@ use futures::FutureExt;
 use futures::future::{BoxFuture, ok};
 use itertools::Itertools;
 use vortex_array::ArrayRef;
+use vortex_array::pipeline::operators::MaskFuture;
 use vortex_error::{VortexError, VortexResult};
 use vortex_expr::ExprRef;
-use vortex_layout::{LayoutReader, MaskFuture};
+use vortex_layout::LayoutReader;
 use vortex_mask::Mask;
 
 use crate::Selection;

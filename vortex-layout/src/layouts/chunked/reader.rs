@@ -12,6 +12,7 @@ use futures::{FutureExt, TryStreamExt};
 use itertools::Itertools;
 use vortex_array::ArrayRef;
 use vortex_array::arrays::ChunkedArray;
+use vortex_array::pipeline::operators::MaskFuture;
 use vortex_array::stats::Precision;
 use vortex_dtype::{DType, FieldMask};
 use vortex_error::{VortexExpect, VortexResult, vortex_panic};
@@ -22,8 +23,7 @@ use crate::layouts::chunked::ChunkedLayout;
 use crate::reader::LayoutReader;
 use crate::segments::SegmentSource;
 use crate::{
-    ArrayEvaluation, LayoutReaderRef, LazyReaderChildren, MaskEvaluation, MaskFuture,
-    PruningEvaluation,
+    ArrayEvaluation, LayoutReaderRef, LazyReaderChildren, MaskEvaluation, PruningEvaluation,
 };
 
 /// A [`LayoutReader`] for chunked layouts.
@@ -348,6 +348,7 @@ mod test {
     use futures::executor::block_on;
     use futures::stream;
     use rstest::{fixture, rstest};
+    use vortex_array::pipeline::operators::MaskFuture;
     use vortex_array::{ArrayContext, IntoArray, ToCanonical};
     use vortex_buffer::buffer;
     use vortex_dtype::Nullability::NonNullable;
@@ -358,9 +359,7 @@ mod test {
     use crate::layouts::flat::writer::FlatLayoutStrategy;
     use crate::segments::{SegmentSource, SequenceWriter, TestSegments};
     use crate::sequence::SequenceId;
-    use crate::{
-        LayoutRef, LayoutStrategy, MaskFuture, SequentialStreamAdapter, SequentialStreamExt as _,
-    };
+    use crate::{LayoutRef, LayoutStrategy, SequentialStreamAdapter, SequentialStreamExt as _};
 
     #[fixture]
     /// Create a chunked layout with three chunks of primitive arrays.
