@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
@@ -13,13 +14,13 @@ use vortex_layout::sequence::SequenceId;
 use crate::footer::SegmentSpec;
 
 pub struct BufferedSegmentSink {
-    buffers: kanal::AsyncSender<VortexResult<ByteBuffer>>,
+    buffers: kanal::AsyncSender<ByteBuffer>,
     byte_offset: AtomicU64,
     segment_specs: Mutex<Vec<SegmentSpec>>,
 }
 
 impl BufferedSegmentSink {
-    pub fn new(send: kanal::AsyncSender<VortexResult<ByteBuffer>>, byte_offset: u64) -> Self {
+    pub fn new(send: kanal::AsyncSender<ByteBuffer>, byte_offset: u64) -> Self {
         Self {
             buffers: send,
             byte_offset: AtomicU64::new(byte_offset),
@@ -27,9 +28,10 @@ impl BufferedSegmentSink {
         }
     }
 
-    pub fn to_specs(&self) -> Vec<SegmentSpec> {
+    /// Close the sink, returning the segment specs and the final byte offset.
+    pub fn segment_specs(&self) -> Arc<[SegmentSpec]> {
         let specs = self.segment_specs.lock();
-        specs.clone()
+        specs.clone().into()
     }
 }
 
@@ -84,10 +86,10 @@ impl SegmentSink for BufferedSegmentSink {
         };
 
         if let Some(padding) = padding_bufer {
-            let _ = self.buffers.send(Ok(padding)).await;
+            let _ = self.buffers.send(padding).await;
         }
         for buffer in buffers {
-            let _ = self.buffers.send(Ok(buffer)).await;
+            let _ = self.buffers.send(buffer).await;
         }
 
         Ok(segment_id)

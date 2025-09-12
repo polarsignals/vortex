@@ -3,7 +3,6 @@
 
 #![allow(clippy::expect_used)]
 
-use std::io::Write;
 use std::path::Path;
 
 use futures::executor::block_on;

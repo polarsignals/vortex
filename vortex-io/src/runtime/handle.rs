@@ -26,6 +26,22 @@ impl Handle {
         Self { runtime }
     }
 
+    /// Returns a handle to the current runtime, if such a reasonable choice exists.
+    ///
+    /// For example, if called from within a Tokio context this will return a
+    /// [`crate::runtime::tokio::TokioRuntime`] handle.
+    pub fn find() -> Option<Self> {
+        #[cfg(feature = "tokio")]
+        {
+            use tokio::runtime::Handle as TokioHandle;
+            if TokioHandle::try_current().is_ok() {
+                return Some(crate::runtime::tokio::TokioRuntime::current());
+            }
+        }
+
+        None
+    }
+
     /// Spawn a new future onto the runtime.
     ///
     /// These futures are expected to not perform expensive CPU work and instead simply schedule
@@ -58,20 +74,7 @@ impl Handle {
         Fut: Future<Output = R> + Send + 'static,
         R: Send + 'static,
     {
-        let fut = f(Handle::new(self.runtime.clone()));
-
-        let (send, recv) = oneshot::channel();
-        let abort_handle = self.runtime.spawn(
-            async move {
-                // Task::detach allows the receiver to be dropped, so we ignore send errors.
-                let _ = send.send(fut.await);
-            }
-            .boxed(),
-        );
-        Task {
-            recv,
-            abort_handle: Some(abort_handle),
-        }
+        self.spawn(f(Handle::new(self.runtime.clone())))
     }
 
     /// Spawn a CPU-bound task for execution on the runtime.

@@ -93,6 +93,7 @@
 //! Anything implementing [`VortexReadAt`](vortex_io::VortexReadAt), for example local files, byte
 //! buffers, and [cloud storage](vortex_io::ObjectStoreReadAt), can be used as the backing store.
 
+mod counting;
 mod driver;
 mod file;
 mod footer;
@@ -140,8 +141,8 @@ mod forever_constant {
     /// The extension for Vortex files
     pub const VORTEX_FILE_EXTENSION: &str = "vortex";
 
-    /// The maximum length of a Vortex footer in bytes
-    pub const MAX_FOOTER_SIZE: u16 = u16::MAX - 8;
+    /// The maximum length of a Vortex postscript in bytes
+    pub const MAX_POSTSCRIPT_SIZE: u16 = u16::MAX - 8;
     /// The magic bytes for a Vortex file
     pub const MAGIC_BYTES: [u8; 4] = *b"VTXF";
     /// The size of the EOF marker in bytes
@@ -155,7 +156,7 @@ mod forever_constant {
         #[test]
         fn never_change_these_constants() {
             assert_eq!(V1_FOOTER_FBS_SIZE, 32);
-            assert_eq!(MAX_FOOTER_SIZE, 65527);
+            assert_eq!(MAX_POSTSCRIPT_SIZE, 65527);
             assert_eq!(MAGIC_BYTES, *b"VTXF");
             assert_eq!(EOF_SIZE, 8);
         }

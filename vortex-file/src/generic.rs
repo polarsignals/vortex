@@ -17,7 +17,7 @@ use crate::segments::{
     InitialReadSegmentCache, MokaSegmentCache, NoOpSegmentCache, SegmentCache, SegmentCacheMetrics,
     SegmentCacheSourceAdapter,
 };
-use crate::{EOF_SIZE, FileType, Footer, MAX_FOOTER_SIZE, VortexFile, VortexOpenOptions};
+use crate::{EOF_SIZE, FileType, Footer, MAX_POSTSCRIPT_SIZE, VortexFile, VortexOpenOptions};
 
 #[cfg(feature = "tokio")]
 static TOKIO_DISPATCHER: std::sync::LazyLock<IoDispatcher> =
@@ -164,7 +164,7 @@ impl VortexOpenOptions<GenericVortexFile> {
             .options
             .initial_read_size
             // Make sure we read enough to cover the postscript
-            .max(MAX_FOOTER_SIZE as u64 + EOF_SIZE as u64)
+            .max(MAX_POSTSCRIPT_SIZE as u64 + EOF_SIZE as u64)
             .min(file_size);
         let initial_offset = file_size - initial_read_size;
         let initial_read: ByteBuffer = self

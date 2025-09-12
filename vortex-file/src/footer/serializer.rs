@@ -9,7 +9,7 @@ use vortex_layout::LayoutContext;
 use crate::footer::FileStatistics;
 use crate::footer::file_layout::FooterFlatBufferWriter;
 use crate::footer::postscript::{Postscript, PostscriptSegment};
-use crate::{EOF_SIZE, Footer, MAGIC_BYTES, MAX_FOOTER_SIZE, VERSION};
+use crate::{EOF_SIZE, Footer, MAGIC_BYTES, MAX_POSTSCRIPT_SIZE, VERSION};
 
 pub struct FooterSerializer {
     footer: Footer,
@@ -98,11 +98,11 @@ impl FooterSerializer {
             footer: footer_segment,
         };
         let postscript_buffer = postscript.write_flatbuffer_bytes();
-        if postscript_buffer.len() > MAX_FOOTER_SIZE as usize {
+        if postscript_buffer.len() > MAX_POSTSCRIPT_SIZE as usize {
             Err(vortex_err!(
                 "Postscript is too large ({} bytes); max postscript size is {}",
                 postscript_buffer.len(),
-                MAX_FOOTER_SIZE
+                MAX_POSTSCRIPT_SIZE
             ))?;
         }
 
