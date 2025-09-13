@@ -6,20 +6,20 @@ use std::sync::{Arc, LazyLock};
 use futures::future::BoxFuture;
 use wasm_bindgen_futures::spawn_local;
 
-use crate::runtime::{AbortHandle, AbortHandleRef, Handle, IoTask, Runtime};
+use crate::runtime::{AbortHandle, AbortHandleRef, Executor, Handle, IoTask};
 
 /// A Vortex runtime that drives work in a WebAssembly environment.
 pub struct WasmRuntime;
 
 impl WasmRuntime {
     pub fn handle() -> Handle {
-        static RUNTIME: LazyLock<Arc<WasmRuntime>> = LazyLock::new(|| Arc::new(WasmRuntime));
+        static RUNTIME: LazyLock<Arc<dyn Executor>> = LazyLock::new(|| Arc::new(WasmRuntime));
 
-        Handle::new(RUNTIME.clone())
+        Handle::new(Arc::downgrade(&RUNTIME))
     }
 }
 
-impl Runtime for WasmRuntime {
+impl Executor for WasmRuntime {
     fn spawn(&self, fut: BoxFuture<'static, ()>) -> AbortHandleRef {
         spawn_local(fut);
         Box::new(NoOpAbortHandle)

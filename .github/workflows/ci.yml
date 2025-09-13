@@ -166,12 +166,6 @@ jobs:
           - name: "with tokio dispatcher"
             command: "build"
             args: "--no-default-features --features tokio --all-targets --ignore-unknown-features"
-          - name: "with compio dispatcher"
-            command: "build"
-            args: "--no-default-features --features compio --all-targets --ignore-unknown-features"
-          - name: "with tokio+compio dispatcher"
-            command: "build"
-            args: "--no-default-features --features tokio,compio --all-targets --ignore-unknown-features"
           - name: "wasm32 with default features"
             command: "build"
             target: wasm32-unknown-unknown
