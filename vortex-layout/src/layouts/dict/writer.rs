@@ -7,7 +7,6 @@ use std::task::{Context, Poll};
 
 use async_stream::{stream, try_stream};
 use async_trait::async_trait;
-use futures::channel::oneshot;
 use futures::future::BoxFuture;
 use futures::stream::{BoxStream, once};
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt, pin_mut, try_join};

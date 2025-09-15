@@ -2718,6 +2718,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "handle"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52ed72152641d513a6084a3907bfcba3f35ae2d3335c22ce2242969c25ff8e46"
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3482,21 +3488,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f78c730aaa7d0b9336a299029ea49f9ee53b0ed06e9202e8cb7db9bae7b8c82"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "linked-hash-map"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
-
-[[package]]
-name = "linked_hash_set"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bae85b5be22d9843c80e5fc80e9b64c8a3b1f98f867c709956eca3efff4e92e2"
-dependencies = [
- "linked-hash-map",
 ]
 
 [[package]]
@@ -6760,7 +6751,6 @@ dependencies = [
  "getrandom 0.3.3",
  "itertools 0.14.0",
  "kanal",
- "linked_hash_set",
  "log",
  "object_store",
  "parking_lot",
@@ -6848,10 +6838,12 @@ dependencies = [
  "anyhow",
  "async-compat",
  "async-stream",
+ "async-trait",
  "bytes",
  "cfg-if",
  "futures",
  "getrandom 0.3.3",
+ "handle",
  "itertools 0.14.0",
  "kanal",
  "log",
@@ -6924,6 +6916,7 @@ dependencies = [
  "log",
  "moka",
  "once_cell",
+ "oneshot",
  "parking_lot",
  "paste",
  "pco",

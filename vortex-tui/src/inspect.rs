@@ -39,7 +39,7 @@ pub enum InspectMode {
     Footer,
 }
 
-pub fn exec_inspect(args: InspectArgs) -> anyhow::Result<()> {
+pub async fn exec_inspect(args: InspectArgs) -> anyhow::Result<()> {
     let mut inspector = VortexInspector::new(args.file.clone())?;
 
     println!("File: {}", args.file.display());
@@ -91,7 +91,7 @@ pub fn exec_inspect(args: InspectArgs) -> anyhow::Result<()> {
                 }
             };
 
-            match inspector.read_footer() {
+            match inspector.read_footer().await {
                 Ok(footer) => FooterSegments(footer).display(),
                 Err(e) => {
                     eprintln!("\nError reading footer segments: {}", e);
@@ -207,9 +207,10 @@ impl VortexInspector {
         })
     }
 
-    fn read_footer(&mut self) -> VortexResult<Footer> {
-        Ok(VortexOpenOptions::file()
-            .open_blocking(&self.path)?
+    async fn read_footer(&mut self) -> VortexResult<Footer> {
+        Ok(VortexOpenOptions::new()
+            .open(self.path.as_path())
+            .await?
             .footer()
             .clone())
     }

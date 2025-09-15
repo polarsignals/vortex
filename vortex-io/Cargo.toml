@@ -19,6 +19,7 @@ all-features = true
 [dependencies]
 async-compat = { workspace = true }
 async-stream = { workspace = true }
+async-trait = { workspace = true }
 bytes = { workspace = true }
 cfg-if = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }
@@ -31,6 +32,7 @@ oneshot = { workspace = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
 # this is the maximum subset of fetaures that is safe for wasm32 targets
+handle = "1.0.2"
 tokio = { workspace = true, features = ["io-util", "rt", "sync"] }
 tracing = { workspace = true }
 vortex-buffer = { workspace = true }

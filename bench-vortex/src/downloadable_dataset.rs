@@ -70,8 +70,8 @@ impl Dataset for DownloadableDataset {
         })
         .await?;
 
-        Ok(VortexOpenOptions::file()
-            .open(&vortex)
+        Ok(VortexOpenOptions::new()
+            .open(vortex.as_path())
             .await?
             .scan()?
             .into_array_iter_multithread()?

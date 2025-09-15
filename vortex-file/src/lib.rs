@@ -89,15 +89,10 @@
 //! or without chunking, or completely elide statistics to save space or if they are not needed, for
 //! example if the metadata is being stored in an external index.
 //!
-//! Anything implementing [`VortexReadAt`](vortex_io::VortexReadAt), for example local files, byte
-//! buffers, and [cloud storage](vortex_io::ObjectStoreReadAt), can be used as the backing store.
 
 mod counting;
-mod driver;
 mod file;
 mod footer;
-mod generic;
-mod memory;
 mod open;
 mod pruning;
 pub mod segments;
@@ -111,8 +106,6 @@ use std::sync::{Arc, LazyLock};
 pub use file::*;
 pub use footer::*;
 pub use forever_constant::*;
-pub use generic::*;
-pub use memory::*;
 pub use open::*;
 pub use strategy::*;
 use vortex_alp::{ALPEncoding, ALPRDEncoding};

@@ -2,117 +2,16 @@
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
 use std::io;
-use std::os::unix::prelude::FileExt;
 use std::sync::Arc;
 
 use bytes::BytesMut;
-use futures::future::BoxFuture;
+use futures::TryStreamExt;
 use futures::stream::FuturesUnordered;
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use object_store::path::Path;
-use object_store::{
-    GetOptions, GetRange, GetResultPayload, MultipartUpload, ObjectStore, ObjectStoreScheme,
-    PutPayload, PutResult,
-};
-use vortex_buffer::{Alignment, ByteBuffer, ByteBufferMut};
-use vortex_error::{VortexError, VortexResult, vortex_err};
+use object_store::{MultipartUpload, ObjectStore, PutPayload, PutResult};
+use vortex_error::VortexResult;
 
-use crate::{IoBuf, PerformanceHint, VortexReadAt, VortexWrite};
-
-#[derive(Clone)]
-pub struct ObjectStoreReadAt {
-    object_store: Arc<dyn ObjectStore>,
-    location: Path,
-    scheme: Option<ObjectStoreScheme>,
-}
-
-impl ObjectStoreReadAt {
-    pub fn new(
-        object_store: Arc<dyn ObjectStore>,
-        location: Path,
-        scheme: Option<ObjectStoreScheme>,
-    ) -> Self {
-        Self {
-            object_store,
-            location,
-            scheme,
-        }
-    }
-}
-
-impl VortexReadAt for ObjectStoreReadAt {
-    fn read_at(
-        &self,
-        offset: u64,
-        length: usize,
-        alignment: Alignment,
-    ) -> BoxFuture<'static, VortexResult<ByteBuffer>> {
-        let object_store = self.object_store.clone();
-        let location = self.location.clone();
-
-        async move {
-            // Instead of calling `ObjectStore::get_range`, we expand the implementation and run it
-            // ourselves to avoid a second copy to align the buffer. Instead, we can write directly
-            // into the aligned buffer.
-            let mut buffer = ByteBufferMut::with_capacity_aligned(length, alignment);
-
-            let response = object_store
-                .get_opts(
-                    &location,
-                    GetOptions {
-                        range: Some(GetRange::Bounded(offset..(offset + length as u64))),
-                        ..Default::default()
-                    },
-                )
-                .await?;
-
-            let buffer = match response.payload {
-                GetResultPayload::File(file, _) => {
-                    // SAFETY: We're setting the length to the exact size we're about to read.
-                    // The read_exact_at call will either fill the entire buffer or return an error,
-                    // ensuring no uninitialized memory is exposed.
-                    unsafe { buffer.set_len(length) };
-                    #[cfg(feature = "tokio")]
-                    {
-                        tokio::task::spawn_blocking(move || {
-                            file.read_exact_at(&mut buffer, offset)?;
-                            Ok::<_, VortexError>(buffer)
-                        })
-                        .map_err(|e| vortex_err!("Join error: {}", e))
-                        .await??
-                    }
-                    #[cfg(not(feature = "tokio"))]
-                    {
-                        file.read_exact_at(&mut buffer, offset)?;
-                        Ok::<_, VortexError>(buffer)
-                    }
-                }
-                GetResultPayload::Stream(mut byte_stream) => {
-                    while let Some(bytes) = byte_stream.next().await {
-                        buffer.extend_from_slice(&bytes?);
-                    }
-                    buffer
-                }
-            };
-
-            Ok(buffer.freeze())
-        }
-        .boxed()
-    }
-
-    fn size(&self) -> BoxFuture<'static, VortexResult<u64>> {
-        let object_store = self.object_store.clone();
-        let location = self.location.clone();
-        async move { Ok(object_store.head(&location).await?.size) }.boxed()
-    }
-
-    fn performance_hint(&self) -> PerformanceHint {
-        match &self.scheme {
-            Some(ObjectStoreScheme::Local | ObjectStoreScheme::Memory) => PerformanceHint::local(),
-            _ => PerformanceHint::object_storage(),
-        }
-    }
-}
+use crate::{IoBuf, VortexWrite};
 
 /// Adapter type to write data through a [`ObjectStore`] instace.
 ///

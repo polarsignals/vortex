@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use vortex_buffer::{Alignment, ByteBuffer};
@@ -23,7 +24,8 @@ pub trait VortexReadAt: Send + Sync + 'static {
     /// If the reader does not have the requested number of bytes, the returned Future will complete
     /// with an [`UnexpectedEof`][std::io::ErrorKind::UnexpectedEof].
     ///
-    /// ## Thread Safety
+    /// This function returns a future with a `'static` lifetime. This allows us to define the
+    /// following semantics:
     ///
     /// This function returns a future with a `'static` lifetime, allowing us to define the
     /// following semantics:
@@ -158,15 +160,41 @@ pub struct InstrumentedReadAt<T: VortexReadAt> {
 }
 
 impl<T: VortexReadAt> InstrumentedReadAt<T> {
-    pub fn new(read: T, metrics: &VortexMetrics) -> Self {
+    pub fn new(read: Arc<T>, metrics: &VortexMetrics) -> Self {
         Self {
-            read: Arc::new(read),
+            read,
             sizes: metrics.histogram("vortex.io.read.size"),
             durations: metrics.timer("vortex.io.read.duration"),
         }
     }
 }
 
+impl<T> Drop for InstrumentedReadAt<T>
+where
+    T: VortexReadAt,
+{
+    fn drop(&mut self) {
+        let sizes = self.sizes.snapshot();
+        log::debug!("Reads: {}", self.sizes.count());
+        log::debug!(
+            "Read size: p50={} p95={} p99={} p999={}",
+            sizes.value(0.5),
+            sizes.value(0.95),
+            sizes.value(0.99),
+            sizes.value(0.999),
+        );
+        let durations = self.durations.snapshot();
+        log::debug!(
+            "Read duration: p50={}ms p95={}ms p99={}ms p999={}ms",
+            durations.value(0.5) / 1_000_000.0,
+            durations.value(0.95) / 1_000_000.0,
+            durations.value(0.99) / 1_000_000.0,
+            durations.value(0.999) / 1_000_000.0
+        );
+    }
+}
+
+#[async_trait]
 impl<T: VortexReadAt> VortexReadAt for InstrumentedReadAt<T> {
     fn read_at(
         &self,

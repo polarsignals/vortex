@@ -437,8 +437,8 @@ impl Dataset for PBIBenchmark {
             .ok_or_else(|| anyhow!("must have at least one table"))?
             .clone();
 
-        Ok(VortexOpenOptions::file()
-            .open(&path)
+        Ok(VortexOpenOptions::new()
+            .open(path.as_path())
             .await?
             .scan()?
             .into_array_iter_multithread()?

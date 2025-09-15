@@ -11,8 +11,10 @@ use arrow_schema::{Schema, SchemaRef};
 use vortex::ArrayRef;
 use vortex::buffer::Buffer;
 use vortex::file::VortexOpenOptions;
+use vortex::io::runtime::BlockingRuntime;
 use vortex::scan::ScanBuilder;
 
+use crate::RUNTIME;
 use crate::expr::Expr;
 
 pub(crate) struct VortexFile {
@@ -35,9 +37,14 @@ impl VortexFile {
 /// File operations - using blocking operations for simplicity
 /// TODO(xinyu): object store (see vortex-ffi)
 pub(crate) fn open_file(path: &str) -> Result<Box<VortexFile>> {
-    let file = VortexOpenOptions::file().open_blocking(std::path::Path::new(path))?;
+    let file = RUNTIME.block_on(|h| {
+        VortexOpenOptions::new()
+            .with_handle(h)
+            .open(std::path::Path::new(path))
+    })?;
     Ok(Box::new(VortexFile { inner: file }))
 }
+
 pub(crate) struct VortexScanBuilder {
     inner: ScanBuilder<ArrayRef>,
     output_schema: Option<SchemaRef>,

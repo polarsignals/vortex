@@ -37,8 +37,8 @@ pub async fn take_parquet(path: &Path, indices: Buffer<u64>) -> anyhow::Result<R
 }
 
 async fn take_vortex(reader: impl AsRef<Path>, indices: Buffer<u64>) -> anyhow::Result<ArrayRef> {
-    Ok(VortexOpenOptions::file()
-        .open(reader)
+    Ok(VortexOpenOptions::new()
+        .open(reader.as_ref())
         .await?
         .scan()?
         .with_row_indices(indices)
