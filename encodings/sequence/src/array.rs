@@ -29,7 +29,7 @@ pub struct SequenceArray {
     base: PValue,
     multiplier: PValue,
     dtype: DType,
-    length: usize,
+    pub(crate) length: usize,
     stats_set: ArrayStats,
 }
 

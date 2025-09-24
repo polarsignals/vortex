@@ -20,18 +20,14 @@
 
 pub mod bits;
 pub(crate) mod operator;
+pub mod row_selection;
 mod types;
 pub mod vec;
 pub mod view;
 
-/// The number of elements in each step of a Vortex evaluation operator.
-pub const N: usize = 1024;
-
-// Number of usize words needed to store N bits
-pub const N_WORDS: usize = N / usize::BITS as usize;
-
 use std::cell::RefCell;
 
+pub use row_selection::*;
 pub use types::*;
 use vec::VectorRef;
 use vortex_error::VortexResult;
@@ -40,8 +36,18 @@ use self::vec::Vector;
 use self::view::ViewMut;
 use crate::Canonical;
 use crate::operator::Operator;
+use crate::pipeline::bits::BitView;
+
+/// The number of elements in each step of a Vortex evaluation operator.
+pub const N: usize = 1024;
+
+// Number of usize words needed to store N bits
+pub const N_WORDS: usize = N / usize::BITS as usize;
 
 pub trait PipelinedOperator: Operator {
+    /// Defines the row selection of this pipeline operator.
+    fn row_selection(&self) -> RowSelection;
+
     // Whether this operator works by mutating its first child in-place.
     //
     // If `true`, the operator is invoked with the first child's input data passed via the
@@ -81,15 +87,25 @@ pub type BatchId = usize;
 pub trait Kernel: Send {
     /// Attempts to perform a single step of the operator, writing data to the output vector.
     ///
-    /// The output vector is guaranteed to have space for at least `N` elements. The kernel
-    /// may write up to `N` elements to the output vector, and must update the length of the
-    /// output vector to reflect the number of elements written.
+    /// The kernel step should be stateless and is passed the chunk index as well as the selection
+    /// mask for this chunk.
     ///
-    /// TODO(ngates): alternatively, we allow the kernel to write sparse output vectors using a
-    ///  Selection enum of Prefix(n), Masked(Mask), or All. This would allow parent kernels to
-    ///  decide when to flatten the vector. The problem is it becomes ambiguous who is responsible
-    ///  for compacting very sparse vectors.
-    fn step(&mut self, ctx: &KernelContext, out: &mut ViewMut) -> VortexResult<()>;
+    /// Input and output vectors have a `Selection` enum indicating which elements of the vector
+    /// are valid for processing. This is one of:
+    /// * Full - all N elements are valid.
+    /// * Prefix - the first n elements are valid, where n is the true count of the selection mask.
+    /// * Mask - only the elements indicated by the selection mask are valid.
+    ///
+    /// Kernel should inspect the selection enum of the input and iterate the values accordingly.
+    /// They may choose to write the output vector in any selection mode, but should choose the most
+    /// efficient mode possible - not forgetting to update the output vector's selection enum.
+    fn step(
+        &self,
+        ctx: &KernelContext,
+        chunk_idx: usize,
+        selection: &BitView,
+        out: &mut ViewMut,
+    ) -> VortexResult<()>;
 }
 
 /// Context passed to kernels during execution, providing access to vectors.

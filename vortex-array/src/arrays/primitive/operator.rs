@@ -13,8 +13,8 @@ use crate::Canonical;
 use crate::arrays::{PrimitiveArray, PrimitiveVTable};
 use crate::operator::canonical::CanonicalExecution;
 use crate::operator::{
-    BatchBindCtx, BatchExecutionRef, BatchOperator, DisplayFormat, Operator, OperatorEq,
-    OperatorHash, OperatorId, OperatorRef,
+    BatchBindCtx, BatchExecutionRef, BatchOperator, DisplayFormat, LengthBounds, Operator,
+    OperatorEq, OperatorHash, OperatorId, OperatorRef,
 };
 use crate::vtable::PipelineVTable;
 
@@ -53,8 +53,8 @@ impl Operator for PrimitiveArray {
         &self.dtype
     }
 
-    fn len(&self) -> usize {
-        self.buffer.len() / self.dtype.as_ptype().byte_width()
+    fn bounds(&self) -> LengthBounds {
+        LengthBounds::from(self.buffer.len() / self.dtype.as_ptype().byte_width())
     }
 
     fn children(&self) -> &[OperatorRef] {

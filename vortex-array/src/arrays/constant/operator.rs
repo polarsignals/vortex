@@ -9,9 +9,13 @@ use vortex_dtype::{DType, NativePType, match_each_native_ptype};
 use vortex_error::{VortexExpect, VortexResult};
 
 use crate::arrays::{ConstantArray, ConstantVTable};
-use crate::operator::{Operator, OperatorEq, OperatorHash, OperatorId, OperatorRef};
+use crate::operator::{LengthBounds, Operator, OperatorEq, OperatorHash, OperatorId, OperatorRef};
+use crate::pipeline::bits::BitView;
+use crate::pipeline::vec::Selection;
 use crate::pipeline::view::ViewMut;
-use crate::pipeline::{BindContext, Element, Kernel, KernelContext, N, PipelinedOperator};
+use crate::pipeline::{
+    BindContext, Element, Kernel, KernelContext, N, PipelinedOperator, RowSelection,
+};
 use crate::vtable::PipelineVTable;
 
 impl PipelineVTable<ConstantVTable> for ConstantVTable {
@@ -46,8 +50,8 @@ impl Operator for ConstantArray {
         self.scalar.dtype()
     }
 
-    fn len(&self) -> usize {
-        self.len
+    fn bounds(&self) -> LengthBounds {
+        self.len.into()
     }
 
     fn children(&self) -> &[OperatorRef] {
@@ -60,6 +64,10 @@ impl Operator for ConstantArray {
 }
 
 impl PipelinedOperator for ConstantArray {
+    fn row_selection(&self) -> RowSelection {
+        RowSelection::Domain(self.len)
+    }
+
     fn bind(&self, _ctx: &dyn BindContext) -> VortexResult<Box<dyn Kernel>> {
         debug_assert!(matches!(
             self.dtype(),
@@ -67,7 +75,6 @@ impl PipelinedOperator for ConstantArray {
         ));
         match self.scalar.dtype() {
             DType::Bool(_) => Ok(Box::new(BoolConstantKernel {
-                remaining: self.len,
                 value: self
                     .scalar
                     .as_bool()
@@ -78,7 +85,6 @@ impl PipelinedOperator for ConstantArray {
                 self.scalar.as_primitive().ptype(),
                 |T| {
                     Box::new(ConstantKernel::<T> {
-                        remaining: self.len,
                         value: self
                             .scalar
                             .as_primitive()
@@ -105,30 +111,40 @@ impl PipelinedOperator for ConstantArray {
 
 /// Kernel that produces constant primitive values.
 pub struct ConstantKernel<T: NativePType> {
-    remaining: usize,
     value: T,
 }
 
 /// Kernel that produces constant boolean values.
 pub struct BoolConstantKernel {
-    remaining: usize,
     value: bool,
 }
 
 impl<T: Element + NativePType> Kernel for ConstantKernel<T> {
-    fn step(&mut self, _ctx: &KernelContext, out: &mut ViewMut) -> VortexResult<()> {
-        out.as_slice_mut::<T>()[..N].fill(self.value);
-        let len = self.remaining.min(N);
-        out.set_len(len);
+    fn step(
+        &self,
+        _ctx: &KernelContext,
+        _chunk_idx: usize,
+        _selection: &BitView,
+        out: &mut ViewMut,
+    ) -> VortexResult<()> {
+        // TODO(ngates): benchmark whether to populate the true indices, or the entire vector.
+        out.as_array_mut::<T>()[..N].fill(self.value);
+        out.set_selection(Selection::Prefix);
         Ok(())
     }
 }
 
 impl Kernel for BoolConstantKernel {
-    fn step(&mut self, _ctx: &KernelContext, out: &mut ViewMut) -> VortexResult<()> {
-        out.as_slice_mut::<bool>()[..N].fill(self.value);
-        let len = self.remaining.min(N);
-        out.set_len(len);
+    fn step(
+        &self,
+        _ctx: &KernelContext,
+        _chunk_idx: usize,
+        _selection: &BitView,
+        out: &mut ViewMut,
+    ) -> VortexResult<()> {
+        // TODO(ngates): benchmark whether to populate the true indices, or the entire vector.
+        out.as_array_mut::<bool>()[..N].fill(self.value);
+        out.set_selection(Selection::Prefix);
         Ok(())
     }
 }

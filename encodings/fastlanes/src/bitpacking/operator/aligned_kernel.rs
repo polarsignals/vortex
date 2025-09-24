@@ -4,6 +4,7 @@
 use std::cmp::min;
 
 use fastlanes::BitPacking;
+use vortex_array::pipeline::bits::BitView;
 use vortex_array::pipeline::view::ViewMut;
 use vortex_array::pipeline::{Element, Kernel, KernelContext, N};
 use vortex_buffer::Buffer;
@@ -16,9 +17,7 @@ use vortex_error::VortexResult;
 pub struct BitPackedKernel<T: PhysicalPType<Physical: BitPacking>> {
     width: usize,
     packed_stride: usize,
-
     buffer: Buffer<<T as PhysicalPType>::Physical>,
-    packed_offset: usize,
 }
 
 impl<T: PhysicalPType<Physical: BitPacking>> BitPackedKernel<T> {
@@ -26,13 +25,11 @@ impl<T: PhysicalPType<Physical: BitPacking>> BitPackedKernel<T> {
         width: usize,
         packed_stride: usize,
         buffer: Buffer<<T as PhysicalPType>::Physical>,
-        packed_offset: usize,
     ) -> Self {
         Self {
             width,
             packed_stride,
             buffer,
-            packed_offset,
         }
     }
 }
@@ -43,18 +40,33 @@ where
     T: Element,
     <T as PhysicalPType>::Physical: Element,
 {
-    fn step(&mut self, _ctx: &KernelContext, out: &mut ViewMut) -> VortexResult<()> {
+    fn step(
+        &self,
+        _ctx: &KernelContext,
+        chunk_idx: usize,
+        _selection: &BitView,
+        out: &mut ViewMut,
+    ) -> VortexResult<()> {
+        assert_eq!(
+            N % 1024,
+            0,
+            "BitPackedKernel assumes N is a multiple of 1024"
+        );
+
         // We re-interpret the output view as the unsigned bitpacked type.
         out.reinterpret_as::<<T as PhysicalPType>::Physical>();
 
-        let elements = out.as_slice_mut::<<T as PhysicalPType>::Physical>();
-        let packed = &self.buffer.as_slice()[self.packed_offset..];
+        let elements = out.as_array_mut::<<T as PhysicalPType>::Physical>();
 
-        // We compute the number of FastLanes vectors that we have remaining.
+        let packed_offset = ((chunk_idx * N) / 1024) * self.packed_stride;
+        let packed = &self.buffer.as_slice()[packed_offset..];
+
+        // We compute the number of FastLanes vectors for this chunk.
         let nvecs = min(N / 1024, packed.len() / self.packed_stride);
 
-        // We short-circuit full unpacking logic if the mask is sufficiently sparse.
         for i in 0..nvecs {
+            // TODO(ngates): decide if the selection mask is sufficiently sparse to warrant
+            //  unpacking only the selected elements.
             unsafe {
                 BitPacking::unchecked_unpack(
                     self.width,
@@ -63,7 +75,6 @@ where
                 );
             }
         }
-        self.packed_offset += nvecs * self.packed_stride;
 
         out.reinterpret_as::<T>();
 

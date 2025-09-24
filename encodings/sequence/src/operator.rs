@@ -8,9 +8,15 @@ use std::sync::Arc;
 use num_traits::{ConstOne, PrimInt};
 use vortex_array::Array;
 use vortex_array::operator::slice::SliceOperator;
-use vortex_array::operator::{Operator, OperatorEq, OperatorHash, OperatorId, OperatorRef};
+use vortex_array::operator::{
+    LengthBounds, Operator, OperatorEq, OperatorHash, OperatorId, OperatorRef,
+};
+use vortex_array::pipeline::bits::BitView;
+use vortex_array::pipeline::vec::Selection;
 use vortex_array::pipeline::view::ViewMut;
-use vortex_array::pipeline::{BindContext, Element, Kernel, KernelContext, N, PipelinedOperator};
+use vortex_array::pipeline::{
+    BindContext, Element, Kernel, KernelContext, N, PipelinedOperator, RowSelection,
+};
 use vortex_array::vtable::PipelineVTable;
 use vortex_dtype::{DType, NativePType, match_each_integer_ptype};
 use vortex_error::{VortexResult, vortex_err};
@@ -28,7 +34,7 @@ impl OperatorHash for SequenceArray {
         self.base().hash(state);
         self.multiplier().hash(state);
         self.dtype().hash(state);
-        self.len().hash(state);
+        self.bounds().hash(state);
     }
 }
 
@@ -37,7 +43,7 @@ impl OperatorEq for SequenceArray {
         self.base() == other.base()
             && self.multiplier() == other.multiplier()
             && self.dtype() == other.dtype()
-            && self.len() == other.len()
+            && self.bounds() == other.bounds()
     }
 }
 
@@ -54,8 +60,8 @@ impl Operator for SequenceArray {
         Array::dtype(self.as_ref())
     }
 
-    fn len(&self) -> usize {
-        Array::len(self.as_ref())
+    fn bounds(&self) -> LengthBounds {
+        Array::len(self.as_ref()).into()
     }
 
     fn children(&self) -> &[OperatorRef] {
@@ -92,20 +98,22 @@ impl Operator for SequenceArray {
 }
 
 impl PipelinedOperator for SequenceArray {
+    fn row_selection(&self) -> RowSelection {
+        RowSelection::Domain(self.as_ref().len())
+    }
+
     fn bind(&self, _ctx: &dyn BindContext) -> VortexResult<Box<dyn Kernel>> {
         Ok(match_each_integer_ptype!(self.ptype(), |T| {
             if self.multiplier().as_primitive::<T>() == <T as ConstOne>::ONE {
                 Box::new(SequenceKernel::<T> {
                     base: self.base().as_primitive::<T>(),
-                    len: self.len(),
-                    offset: 0,
+                    len: Array::len(self.as_ref()),
                 })
             } else {
                 Box::new(MultiplierSequenceKernel::<T> {
                     base: self.base().as_primitive::<T>(),
                     multiplier: self.multiplier().as_primitive::<T>(),
-                    len: self.len(),
-                    offset: 0,
+                    len: Array::len(self.as_ref()),
                 })
             }
         }))
@@ -123,21 +131,41 @@ impl PipelinedOperator for SequenceArray {
 struct SequenceKernel<T> {
     base: T,
     len: usize,
-    offset: usize,
 }
 
 impl<T: Element + NativePType + PrimInt> Kernel for SequenceKernel<T> {
-    fn step(&mut self, _ctx: &KernelContext, out: &mut ViewMut) -> VortexResult<()> {
+    fn step(
+        &self,
+        _ctx: &KernelContext,
+        step_idx: usize,
+        selection: &BitView,
+        out: &mut ViewMut,
+    ) -> VortexResult<()> {
         // TODO(ngates): benchmark and optimize this
-        let values = out.as_slice_mut::<T>();
-        let len = (self.len - self.offset).min(N);
-        for i in 0..len {
-            values[i] = self.base
-                + T::from_usize(self.offset + i)
-                    .ok_or_else(|| vortex_err!("Overflow converting usize to ptype"))?;
+        let values = out.as_array_mut::<T>();
+        let offset = step_idx * N;
+
+        // Check if we're in the final chunk to avoid overflow
+        if (offset + N) > self.len {
+            selection.try_iter_ones(|i| {
+                values[i] = self.base
+                    + T::from_usize(offset + i)
+                        .ok_or_else(|| vortex_err!("Overflow converting usize to ptype"))?;
+                Ok(())
+            })?;
+        } else {
+            for i in 0..N {
+                values[i] = self.base
+                    + T::from_usize(offset + i)
+                        .ok_or_else(|| vortex_err!("Overflow converting usize to ptype"))?;
+            }
         }
-        out.set_len(len);
-        self.offset += len;
+
+        match selection.true_count() {
+            0 | N => out.set_selection(Selection::Prefix),
+            _ => out.set_selection(Selection::Mask),
+        }
+
         Ok(())
     }
 }
@@ -146,26 +174,50 @@ struct MultiplierSequenceKernel<T> {
     base: T,
     multiplier: T,
     len: usize,
-    offset: usize,
 }
 
 impl<T: Element + NativePType + PrimInt> Kernel for MultiplierSequenceKernel<T> {
-    fn step(&mut self, _ctx: &KernelContext, out: &mut ViewMut) -> VortexResult<()> {
+    fn step(
+        &self,
+        _ctx: &KernelContext,
+        chunk_idx: usize,
+        selection: &BitView,
+        out: &mut ViewMut,
+    ) -> VortexResult<()> {
         // TODO(ngates): benchmark and optimize this. We should use addition not multiplication
-        let values = out.as_slice_mut::<T>();
-        let len = (self.len - self.offset).min(N);
-        for i in 0..len {
-            values[i] = self.base
-                + self
-                    .multiplier
-                    .checked_mul(
-                        &T::from_usize(self.offset + i)
-                            .ok_or_else(|| vortex_err!("Overflow converting usize to ptype"))?,
-                    )
-                    .ok_or_else(|| vortex_err!("Overflow computing sequence value"))?;
+        let values = out.as_array_mut::<T>();
+        let offset = chunk_idx * N;
+
+        if (offset + N) > self.len {
+            selection.try_iter_ones(|i| {
+                values[i] = self.base
+                    + self
+                        .multiplier
+                        .checked_mul(
+                            &T::from_usize(offset + i)
+                                .ok_or_else(|| vortex_err!("Overflow converting usize to ptype"))?,
+                        )
+                        .ok_or_else(|| vortex_err!("Overflow computing sequence value"))?;
+                Ok(())
+            })?;
+        } else {
+            for i in 0..N {
+                values[i] = self.base
+                    + self
+                        .multiplier
+                        .checked_mul(
+                            &T::from_usize(offset + i)
+                                .ok_or_else(|| vortex_err!("Overflow converting usize to ptype"))?,
+                        )
+                        .ok_or_else(|| vortex_err!("Overflow computing sequence value"))?;
+            }
         }
-        out.set_len(len);
-        self.offset += len;
+
+        match selection.true_count() {
+            0 | N => out.set_selection(Selection::Prefix),
+            _ => out.set_selection(Selection::Mask),
+        }
+
         Ok(())
     }
 }

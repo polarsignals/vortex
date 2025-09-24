@@ -12,9 +12,13 @@ use vortex_error::{VortexExpect, VortexResult, vortex_bail};
 
 use crate::arrays::ConstantArray;
 use crate::compute::Operator as Op;
-use crate::operator::{Operator, OperatorEq, OperatorHash, OperatorId, OperatorRef};
+use crate::operator::{LengthBounds, Operator, OperatorEq, OperatorHash, OperatorId, OperatorRef};
+use crate::pipeline::bits::BitView;
+use crate::pipeline::vec::Selection;
 use crate::pipeline::view::ViewMut;
-use crate::pipeline::{BindContext, Element, Kernel, KernelContext, PipelinedOperator, VectorId};
+use crate::pipeline::{
+    BindContext, Element, Kernel, KernelContext, PipelinedOperator, RowSelection, VectorId,
+};
 
 #[derive(Debug)]
 pub struct CompareOperator {
@@ -87,8 +91,8 @@ impl Operator for CompareOperator {
         &self.dtype
     }
 
-    fn len(&self) -> usize {
-        self.children[0].len() & self.children[1].len()
+    fn bounds(&self) -> LengthBounds {
+        self.children[0].bounds() & self.children[1].bounds()
     }
 
     fn children(&self) -> &[OperatorRef] {
@@ -109,6 +113,16 @@ impl Operator for CompareOperator {
     }
 
     fn as_pipelined(&self) -> Option<&dyn PipelinedOperator> {
+        // If both children support pipelining, but have different row selections, then we cannot
+        // pipeline without an alignment step (which we currently do not support).
+        if let Some((left, right)) = self.children[0]
+            .as_pipelined()
+            .zip(self.children[1].as_pipelined())
+            && left.row_selection() != right.row_selection()
+        {
+            return None;
+        }
+
         Some(self)
     }
 }
@@ -145,6 +159,13 @@ macro_rules! match_each_compare_op {
 }
 
 impl PipelinedOperator for CompareOperator {
+    fn row_selection(&self) -> RowSelection {
+        self.children[0]
+            .as_pipelined()
+            .map(|p| p.row_selection())
+            .unwrap_or(RowSelection::All)
+    }
+
     #[allow(clippy::cognitive_complexity)]
     fn bind(&self, ctx: &dyn BindContext) -> VortexResult<Box<dyn Kernel>> {
         debug_assert_eq!(self.children[0].dtype(), self.children[1].dtype());
@@ -222,25 +243,53 @@ pub struct ComparePrimitiveKernel<T, Op> {
 }
 
 impl<T: Element + NativePType, Op: CompareOp<T> + Send> Kernel for ComparePrimitiveKernel<T, Op> {
-    fn step(&mut self, ctx: &KernelContext, out: &mut ViewMut) -> VortexResult<()> {
+    fn step(
+        &self,
+        ctx: &KernelContext,
+        _chunk_idx: usize,
+        selection: &BitView,
+        out: &mut ViewMut,
+    ) -> VortexResult<()> {
         let lhs_vec = ctx.vector(self.lhs);
-        let lhs = lhs_vec.as_slice::<T>();
+        let lhs = lhs_vec.as_array::<T>();
         let rhs_vec = ctx.vector(self.rhs);
-        let rhs = rhs_vec.as_slice::<T>();
-        let bools = out.as_slice_mut::<bool>();
+        let rhs = rhs_vec.as_array::<T>();
+        let bools = out.as_array_mut::<bool>();
 
-        assert_eq!(
-            lhs.len(),
-            rhs.len(),
-            "LHS and RHS must have the same length"
-        );
-
-        lhs.iter()
-            .zip(rhs.iter())
-            .zip(bools)
-            .for_each(|((lhs, rhs), bool)| *bool = Op::compare(lhs, rhs));
-
-        out.set_len(lhs.len());
+        match (lhs_vec.selection(), rhs_vec.selection()) {
+            (Selection::Prefix, Selection::Prefix) => {
+                for i in 0..selection.true_count() {
+                    bools[i] = Op::compare(&lhs[i], &rhs[i]);
+                }
+                out.set_selection(Selection::Prefix)
+            }
+            (Selection::Mask, Selection::Mask) => {
+                // TODO(ngates): check density to decide if we should iterate indices or do
+                //  a full scan
+                let mut pos = 0;
+                selection.iter_ones(|idx| {
+                    bools[pos] = Op::compare(&lhs[idx], &rhs[idx]);
+                    pos += 1;
+                });
+                out.set_selection(Selection::Prefix)
+            }
+            (Selection::Mask, Selection::Prefix) => {
+                let mut pos = 0;
+                selection.iter_ones(|idx| {
+                    bools[pos] = Op::compare(&lhs[idx], &rhs[pos]);
+                    pos += 1;
+                });
+                out.set_selection(Selection::Prefix)
+            }
+            (Selection::Prefix, Selection::Mask) => {
+                let mut pos = 0;
+                selection.iter_ones(|idx| {
+                    bools[pos] = Op::compare(&lhs[pos], &rhs[idx]);
+                    pos += 1;
+                });
+                out.set_selection(Selection::Prefix)
+            }
+        }
 
         Ok(())
     }
@@ -255,16 +304,32 @@ struct ScalarComparePrimitiveKernel<T: Element + NativePType, Op: CompareOp<T>> 
 impl<T: Element + NativePType, Op: CompareOp<T> + Send> Kernel
     for ScalarComparePrimitiveKernel<T, Op>
 {
-    fn step(&mut self, ctx: &KernelContext, out: &mut ViewMut) -> VortexResult<()> {
+    fn step(
+        &self,
+        ctx: &KernelContext,
+        _chunk_idx: usize,
+        selection: &BitView,
+        out: &mut ViewMut,
+    ) -> VortexResult<()> {
         let lhs_vec = ctx.vector(self.lhs);
-        let lhs = lhs_vec.as_slice::<T>();
-        let bools = out.as_slice_mut::<bool>();
+        let lhs = lhs_vec.as_array::<T>();
+        let bools = out.as_array_mut::<bool>();
 
-        // Note we zip only over the shortest iterator which is LHS
-        lhs.iter().zip(bools).for_each(|(lhs, bool)| {
-            *bool = Op::compare(lhs, &self.rhs);
-        });
-        out.set_len(lhs.len());
+        match lhs_vec.selection() {
+            Selection::Prefix => {
+                for i in 0..selection.true_count() {
+                    bools[i] = Op::compare(&lhs[i], &self.rhs);
+                }
+                out.set_selection(Selection::Prefix)
+            }
+            Selection::Mask => {
+                // TODO(ngates): decide at what true count we should iter indices...
+                selection.iter_ones(|idx| {
+                    bools[idx] = Op::compare(&lhs[idx], &self.rhs);
+                });
+                out.set_selection(Selection::Mask)
+            }
+        }
 
         Ok(())
     }

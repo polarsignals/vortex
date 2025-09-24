@@ -11,8 +11,8 @@ use futures::try_join;
 use itertools::Itertools;
 use vortex_array::compute::{BetweenOptions, StrictComparison, between as between_compute};
 use vortex_array::operator::{
-    BatchBindCtx, BatchExecution, BatchExecutionRef, BatchOperator, Operator, OperatorEq,
-    OperatorHash, OperatorId, OperatorRef,
+    BatchBindCtx, BatchExecution, BatchExecutionRef, BatchOperator, LengthBounds, Operator,
+    OperatorEq, OperatorHash, OperatorId, OperatorRef,
 };
 use vortex_array::{Array, ArrayRef, Canonical, DeserializeMetadata, IntoArray, ProstMetadata};
 use vortex_dtype::DType;
@@ -283,8 +283,8 @@ impl Operator for BetweenOperator {
         &self.dtype
     }
 
-    fn len(&self) -> usize {
-        self.children[0].len()
+    fn bounds(&self) -> LengthBounds {
+        self.children[0].bounds()
     }
 
     fn children(&self) -> &[OperatorRef] {

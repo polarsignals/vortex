@@ -9,8 +9,10 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use fastlanes::FastLanes;
-use vortex_array::operator::{Operator, OperatorEq, OperatorHash, OperatorId, OperatorRef};
-use vortex_array::pipeline::{BindContext, Kernel, PipelinedOperator};
+use vortex_array::operator::{
+    LengthBounds, Operator, OperatorEq, OperatorHash, OperatorId, OperatorRef,
+};
+use vortex_array::pipeline::{BindContext, Kernel, PipelinedOperator, RowSelection};
 use vortex_array::vtable::PipelineVTable;
 use vortex_buffer::Buffer;
 use vortex_dtype::{DType, PhysicalPType, match_each_integer_ptype};
@@ -75,8 +77,8 @@ impl Operator for BitPackedArray {
         &self.dtype
     }
 
-    fn len(&self) -> usize {
-        self.len
+    fn bounds(&self) -> LengthBounds {
+        self.len.into()
     }
 
     fn children(&self) -> &[OperatorRef] {
@@ -89,6 +91,10 @@ impl Operator for BitPackedArray {
 }
 
 impl PipelinedOperator for BitPackedArray {
+    fn row_selection(&self) -> RowSelection {
+        RowSelection::Domain(self.len)
+    }
+
     fn bind(&self, _ctx: &dyn BindContext) -> VortexResult<Box<dyn Kernel>> {
         assert!(self.bit_width > 0);
         match_each_integer_ptype!(self.ptype(), |T| {
@@ -103,7 +109,6 @@ impl PipelinedOperator for BitPackedArray {
                     self.bit_width as usize,
                     packed_stride,
                     buffer,
-                    0,
                 )) as Box<dyn Kernel>)
             } else {
                 // TODO(ngates): the unaligned kernel needs fixing for the non-masked API

@@ -12,8 +12,8 @@ use vortex_dtype::DType;
 use vortex_error::{VortexError, VortexExpect, VortexResult, vortex_bail};
 
 use crate::operator::{
-    BatchBindCtx, BatchExecution, BatchExecutionRef, BatchOperator, Operator, OperatorEq,
-    OperatorHash, OperatorId, OperatorRef,
+    BatchBindCtx, BatchExecution, BatchExecutionRef, BatchOperator, LengthBounds, Operator,
+    OperatorEq, OperatorHash, OperatorId, OperatorRef,
 };
 use crate::{Array, Canonical, IntoArray};
 
@@ -32,11 +32,11 @@ impl SliceOperator {
                 range.end
             );
         }
-        if range.end > child.len() {
+        if range.end > child.bounds().max {
             vortex_bail!(
                 "slice range end out of bounds: {} > {}",
                 range.end,
-                child.len()
+                child.bounds().max
             );
         }
         Ok(SliceOperator { child, range })
@@ -73,8 +73,8 @@ impl Operator for SliceOperator {
         self.child.dtype()
     }
 
-    fn len(&self) -> usize {
-        self.range.end - self.range.start
+    fn bounds(&self) -> LengthBounds {
+        (self.range.end - self.range.start).into()
     }
 
     fn children(&self) -> &[OperatorRef] {
@@ -89,11 +89,6 @@ impl Operator for SliceOperator {
     }
 
     fn reduce_children(&self) -> VortexResult<Option<OperatorRef>> {
-        // If the slice is a no-op, return the child directly.
-        if self.range == (0..self.child.len()) {
-            return Ok(Some(self.child.clone()));
-        }
-
         // We push down the slice operator to any child that is aligned to the parent.
         let children = (0..self.nchildren())
             .map(|i| {
