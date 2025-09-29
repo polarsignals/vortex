@@ -306,6 +306,16 @@ impl DType {
         matches!(self, Extension(_))
     }
 
+    /// Check if `self` is a nested type, i.e. list, fixed size list, struct, or extension of a
+    /// recursive type.
+    pub fn is_nested(&self) -> bool {
+        match self {
+            List(..) | FixedSizeList(..) | Struct(..) => true,
+            Extension(ext) => ext.storage_dtype().is_nested(),
+            _ => false,
+        }
+    }
+
     /// Check returns the inner decimal type if the dtype is a [`DType::Decimal`].
     pub fn as_decimal_opt(&self) -> Option<&DecimalDType> {
         if let Decimal(decimal, _) = self {
