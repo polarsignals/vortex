@@ -14,7 +14,7 @@ use crate::vtable::{
     ArrayVTable, NotSupported, OperationsVTable, VTable, ValidityHelper,
     ValidityVTableFromValidityHelper,
 };
-use crate::{ArrayRef, EncodingId, EncodingRef, IntoArray, vtable};
+use crate::{Array, ArrayRef, EncodingId, EncodingRef, IntoArray, vtable};
 
 vtable!(Masked);
 
@@ -36,8 +36,8 @@ impl VTable for MaskedVTable {
     type VisitorVTable = Self;
     type ComputeVTable = NotSupported;
     type EncodeVTable = NotSupported;
-    type PipelineVTable = NotSupported;
     type SerdeVTable = Self;
+    type PipelineVTable = NotSupported;
 
     fn id(_encoding: &Self::Encoding) -> EncodingId {
         EncodingId::new_ref("vortex.masked")
@@ -78,7 +78,11 @@ impl ValidityHelper for MaskedArray {
 
 impl MaskedArray {
     pub fn try_new(child: ArrayRef, validity: Validity) -> VortexResult<Self> {
-        if child.valid_count() != child.len() {
+        if matches!(validity, Validity::NonNullable) {
+            vortex_bail!("MaskedArray must have nullable validity, got {validity:?}")
+        }
+
+        if !child.all_valid() {
             vortex_bail!("MaskedArray children must not have nulls");
         }
 
@@ -153,7 +157,6 @@ mod tests {
     use crate::{Array, IntoArray, ToCanonical as _};
 
     #[rstest]
-    #[case(Validity::NonNullable, Nullability::NonNullable)]
     #[case(Validity::AllValid, Nullability::Nullable)]
     #[case(Validity::from_iter([true, false, true]), Nullability::Nullable)]
     fn test_dtype_nullability(#[case] validity: Validity, #[case] expected: Nullability) {
@@ -175,34 +178,16 @@ mod tests {
 
         // Child has nullable dtype
         assert!(child.dtype().is_nullable());
-
-        // But MaskedArray with NonNullable validity should have NonNullable dtype
-        let array = MaskedArray::try_new(child, Validity::NonNullable).unwrap();
-        assert_eq!(
-            array.dtype(),
-            &DType::Primitive(vortex_dtype::PType::I32, Nullability::NonNullable)
-        );
     }
 
     #[test]
     fn test_canonical_dtype_matches_array_dtype() {
         // The canonical form should have the same nullability as the array's dtype
         let child = PrimitiveArray::from_iter([1i32, 2, 3]).into_array();
-        let array = MaskedArray::try_new(child, Validity::NonNullable).unwrap();
+        let array = MaskedArray::try_new(child, Validity::AllValid).unwrap();
 
         let canonical = array.to_canonical();
         assert_eq!(canonical.as_ref().dtype(), array.dtype());
-    }
-
-    #[test]
-    fn test_masked_child_non_nullable() {
-        // When validity is NonNullable, masked_child should return child as-is
-        let child = PrimitiveArray::from_iter([1i32, 2, 3]).into_array();
-        let array = MaskedArray::try_new(child.clone(), Validity::NonNullable).unwrap();
-
-        let masked = array.masked_child().unwrap();
-        assert_eq!(masked.len(), 3);
-        assert_eq!(masked.dtype(), child.dtype());
     }
 
     #[test]
@@ -246,7 +231,6 @@ mod tests {
     }
 
     #[rstest]
-    #[case(Validity::NonNullable)]
     #[case(Validity::AllValid)]
     #[case(Validity::from_iter([true, true, true]))]
     #[case(Validity::from_iter([false, false, false]))]
