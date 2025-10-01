@@ -55,6 +55,18 @@ private:
     unique_ptr<vortex::CData> data;
 };
 
+// This is a complete hack to access the data buffer and pointer of a vector.
+class DataVector : public Vector {
+public:
+	inline void SetDataBuffer(buffer_ptr<VectorBuffer> new_buffer) {
+		buffer = std::move(new_buffer);
+	};
+
+	inline void SetDataPtr(data_ptr_t ptr) {
+		data = ptr;
+	};
+};
+
 } // namespace vortex
 
 extern "C" void duckdb_vx_string_vector_add_buffer(duckdb_vector ffi_vector, duckdb_vx_data buffer) {
@@ -62,6 +74,20 @@ extern "C" void duckdb_vx_string_vector_add_buffer(duckdb_vector ffi_vector, duc
     auto data = reinterpret_cast<vortex::CData *>(buffer);
     auto ext_buffer = duckdb::make_shared_ptr<vortex::ExternalVectorBuffer>(unique_ptr<vortex::CData>(data));
     StringVector::AddBuffer(*vector, ext_buffer);
+}
+
+extern "C" void duckdb_vx_vector_set_data_buffer(duckdb_vector ffi_vector, duckdb_vx_data buffer) {
+    auto vector = reinterpret_cast<Vector *>(ffi_vector);
+    auto dvector = reinterpret_cast<vortex::DataVector *>(vector);
+    auto data = reinterpret_cast<vortex::CData *>(buffer);
+    auto ext_buffer = duckdb::make_shared_ptr<vortex::ExternalVectorBuffer>(unique_ptr<vortex::CData>(data));
+    dvector->SetDataBuffer(ext_buffer);
+}
+
+extern "C" void duckdb_vx_vector_set_data_ptr(duckdb_vector ffi_vector, void *ptr) {
+    auto vector = reinterpret_cast<Vector *>(ffi_vector);
+    auto dvector = reinterpret_cast<vortex::DataVector *>(vector);
+    dvector->SetDataPtr((data_ptr_t)ptr);
 }
 
 void duckdb_vector_flatten(duckdb_vector vector, unsigned long len) {

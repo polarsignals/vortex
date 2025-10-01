@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString, c_void};
 use std::ptr;
 
 use arrow_buffer;
@@ -44,7 +44,7 @@ impl Vector {
         unsafe { Self::own(cpp::duckdb_create_vector(logical_type.as_ptr(), len as _)) }
     }
 
-    /// Append value to the vector.
+    /// Converts the vector is a constant vector with every element `value`.
     pub fn reference_value(&mut self, value: &Value) {
         unsafe {
             cpp::duckdb_vector_reference_value(self.as_ptr(), value.as_ptr());
@@ -139,6 +139,17 @@ impl Vector {
         let is_valid = (validity_entry & (1u64 << idx_in_entry)) != 0;
 
         !is_valid
+    }
+
+    /// Sets the data buffer for the vector.
+    pub unsafe fn set_data_buffer<T>(&self, buffer: T) {
+        let data = Data::from(Box::new(buffer));
+        unsafe { cpp::duckdb_vx_vector_set_data_buffer(self.as_ptr(), data.into_ptr()) }
+    }
+
+    /// Sets the data pointer for the vector. This is the start of the values array in the vector.
+    pub unsafe fn set_data_ptr<T>(&self, ptr: *mut T) {
+        unsafe { cpp::duckdb_vx_vector_set_data_ptr(self.as_ptr(), ptr as *mut c_void) }
     }
 
     pub fn add_string_buffer<T>(&self, buffer: T) {
