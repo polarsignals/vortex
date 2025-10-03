@@ -14,10 +14,11 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
-cudarc = { workspace = true }
+cudarc = { workspace = true, features = ["f16"] }
 parking_lot = { workspace = true }
 vortex-array = { workspace = true }
 vortex-buffer = { workspace = true, features = ["cuda"] }
+vortex-dict = { workspace = true }
 vortex-dtype = { workspace = true }
 vortex-error = { workspace = true }
 vortex-fastlanes = { workspace = true }
