@@ -2416,9 +2416,9 @@ dependencies = [
 
 [[package]]
 name = "fastlanes"
-version = "0.2.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b32ae222e7610a7d2ed53b733ec7a4f2fe15b8bd1d4cffc80d1a6e9b2d91959"
+checksum = "38b79094ac813a000b92adff4231a6d291d063dc6312b3b88c154a5ea0a195d0"
 dependencies = [
  "arrayref",
  "const_for",

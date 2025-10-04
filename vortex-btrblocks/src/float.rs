@@ -17,6 +17,7 @@ pub use self::stats::FloatStats;
 use crate::float::dictionary::dictionary_encode;
 use crate::integer::{IntCompressor, IntegerStats};
 use crate::patches::compress_patches;
+use crate::rle::RLEScheme;
 use crate::{
     Compressor, CompressorStats, GenerateStatsOptions, Scheme,
     estimate_compression_ratio_with_sampling, integer,
@@ -41,6 +42,7 @@ impl Compressor for FloatCompressor {
             &ALPScheme,
             &ALPRDScheme,
             &DictScheme,
+            &RLE_FLOAT_SCHEME,
         ]
     }
 
@@ -58,7 +60,8 @@ const CONSTANT_SCHEME: FloatCode = FloatCode(1);
 const ALP_SCHEME: FloatCode = FloatCode(2);
 const ALPRD_SCHEME: FloatCode = FloatCode(3);
 const DICT_SCHEME: FloatCode = FloatCode(4);
-const RUNEND_SCHEME: FloatCode = FloatCode(5);
+const RUN_END_SCHEME: FloatCode = FloatCode(5);
+const RUN_LENGTH_SCHEME: FloatCode = FloatCode(6);
 
 #[derive(Debug, Copy, Clone)]
 struct UncompressedScheme;
@@ -74,6 +77,13 @@ struct ALPRDScheme;
 
 #[derive(Debug, Copy, Clone)]
 struct DictScheme;
+
+pub const RLE_FLOAT_SCHEME: RLEScheme<FloatStats, FloatCode> = RLEScheme::new(
+    RUN_LENGTH_SCHEME,
+    |values, is_sample, allowed_cascading, excludes| {
+        FloatCompressor::compress(values, is_sample, allowed_cascading, excludes)
+    },
+);
 
 impl Scheme for UncompressedScheme {
     type StatsType = FloatStats;
@@ -222,7 +232,7 @@ impl Scheme for ALPScheme {
         if excludes.contains(&DICT_SCHEME) {
             int_excludes.push(integer::DictScheme.code());
         }
-        if excludes.contains(&RUNEND_SCHEME) {
+        if excludes.contains(&RUN_END_SCHEME) {
             int_excludes.push(integer::RunEndScheme.code());
         }
 
@@ -365,13 +375,15 @@ impl Scheme for DictScheme {
 
 #[cfg(test)]
 mod tests {
+    use std::iter;
+
     use vortex_array::arrays::PrimitiveArray;
     use vortex_array::validity::Validity;
     use vortex_array::{Array, IntoArray, ToCanonical};
     use vortex_buffer::{Buffer, buffer_mut};
 
-    use crate::float::FloatCompressor;
-    use crate::{Compressor, MAX_CASCADE};
+    use crate::float::{FloatCompressor, RLE_FLOAT_SCHEME};
+    use crate::{Compressor, CompressorStats, MAX_CASCADE, Scheme};
 
     #[test]
     fn test_empty() {
@@ -401,5 +413,20 @@ mod tests {
         let floats = values.into_array().to_primitive();
         let compressed = FloatCompressor::compress(&floats, false, MAX_CASCADE, &[]).unwrap();
         println!("compressed: {}", compressed.display_tree())
+    }
+
+    #[test]
+    fn test_rle_compression() {
+        let mut values = Vec::new();
+        values.extend(iter::repeat_n(1.5f32, 100));
+        values.extend(iter::repeat_n(2.7f32, 200));
+        values.extend(iter::repeat_n(3.15f32, 150));
+
+        let array = PrimitiveArray::new(Buffer::copy_from(&values), Validity::NonNullable);
+        let stats = crate::float::FloatStats::generate(&array);
+        let compressed = RLE_FLOAT_SCHEME.compress(&stats, false, 3, &[]).unwrap();
+
+        let decoded = compressed.to_primitive();
+        assert_eq!(decoded.as_slice::<f32>(), values.as_slice());
     }
 }

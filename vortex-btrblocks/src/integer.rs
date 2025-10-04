@@ -23,6 +23,7 @@ use vortex_zigzag::{ZigZagArray, zigzag_encode};
 
 use crate::integer::dictionary::dictionary_encode;
 use crate::patches::compress_patches;
+use crate::rle::RLEScheme;
 use crate::{
     Compressor, CompressorStats, GenerateStatsOptions, Scheme,
     estimate_compression_ratio_with_sampling,
@@ -46,6 +47,7 @@ impl Compressor for IntCompressor {
             &DictScheme,
             &RunEndScheme,
             &SequenceScheme,
+            &RLE_INTEGER_SCHEME,
         ]
     }
 
@@ -99,8 +101,9 @@ const ZIGZAG_SCHEME: IntCode = IntCode(3);
 const BITPACKING_SCHEME: IntCode = IntCode(4);
 const SPARSE_SCHEME: IntCode = IntCode(5);
 const DICT_SCHEME: IntCode = IntCode(6);
-const RUNEND_SCHEME: IntCode = IntCode(7);
+const RUN_END_SCHEME: IntCode = IntCode(7);
 const SEQUENCE_SCHEME: IntCode = IntCode(8);
+const RUN_LENGTH_SCHEME: IntCode = IntCode(9);
 
 #[derive(Debug, Copy, Clone)]
 pub struct UncompressedScheme;
@@ -131,6 +134,13 @@ pub struct SequenceScheme;
 
 /// Threshold for the average run length in an array before we consider run-end encoding.
 const RUN_END_THRESHOLD: u32 = 4;
+
+pub const RLE_INTEGER_SCHEME: RLEScheme<IntegerStats, IntCode> = RLEScheme::new(
+    RUN_LENGTH_SCHEME,
+    |values, is_sample, allowed_cascading, excludes| {
+        IntCompressor::compress_no_dict(values, is_sample, allowed_cascading, excludes)
+    },
+);
 
 impl Scheme for UncompressedScheme {
     type StatsType = IntegerStats;
@@ -622,7 +632,7 @@ impl Scheme for RunEndScheme {
     type CodeType = IntCode;
 
     fn code(&self) -> IntCode {
-        RUNEND_SCHEME
+        RUN_END_SCHEME
     }
 
     fn expected_compression_ratio(
@@ -753,7 +763,9 @@ mod tests {
     use vortex_sparse::SparseEncoding;
     use vortex_utils::aliases::hash_set::HashSet;
 
-    use crate::integer::{IntCompressor, IntegerStats, SequenceScheme, SparseScheme};
+    use crate::integer::{
+        IntCompressor, IntegerStats, RLE_INTEGER_SCHEME, SequenceScheme, SparseScheme,
+    };
     use crate::{Compressor, CompressorStats, Scheme};
 
     #[test]
@@ -863,6 +875,22 @@ mod tests {
             .compress(&IntegerStats::generate(&array), false, 3, &[])
             .unwrap();
         assert_eq!(compressed.encoding_id(), SequenceEncoding.id());
+        let decoded = compressed.to_primitive();
+        assert_eq!(decoded.as_slice::<i32>(), values.as_slice());
+    }
+
+    #[test]
+    fn test_rle_compression() {
+        let mut values = Vec::new();
+        values.extend(std::iter::repeat_n(42i32, 100));
+        values.extend(std::iter::repeat_n(123i32, 200));
+        values.extend(std::iter::repeat_n(987i32, 150));
+
+        let array = PrimitiveArray::new(Buffer::copy_from(&values), Validity::NonNullable);
+        let compressed = RLE_INTEGER_SCHEME
+            .compress(&IntegerStats::generate(&array), false, 3, &[])
+            .unwrap();
+
         let decoded = compressed.to_primitive();
         assert_eq!(decoded.as_slice::<i32>(), values.as_slice());
     }
