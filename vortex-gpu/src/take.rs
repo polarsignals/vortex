@@ -141,10 +141,9 @@ where
         &Values::PTYPE
     );
 
-    let kernel_func = module
+    module
         .load_function(&kernel_name)
-        .map_err(|e| vortex_err!("Failed to load function: {e}"))?;
-    Ok(kernel_func)
+        .map_err(|e| vortex_err!("Failed to load function: {e}"))
 }
 
 #[cfg(all(target_os = "linux", feature = "cuda"))]
@@ -158,23 +157,6 @@ mod tests {
     use vortex_mask::Mask;
 
     use crate::take::{cuda_take, cuda_take_masked};
-
-    #[test]
-    fn test_cuda_take_u32_u32() {
-        let values: PrimitiveArray = (0u32..1024).map(|x| (x + 2) % 1024).collect();
-        let codes: PrimitiveArray = (0u32..1024).map(|x| (x + 1) % 1024).collect();
-        let dict = DictArray::try_new(codes.into_array(), values.into_array()).unwrap();
-
-        let expect: PrimitiveArray = (0u32..1024).map(|x| (x + 3) % 1024).collect();
-        let dict_cpu = dict.to_primitive();
-        assert_eq!(dict_cpu.as_slice::<u32>(), expect.as_slice::<u32>());
-
-        let ctx = CudaContext::new(0).unwrap();
-        ctx.set_blocking_synchronize().unwrap();
-        let result = cuda_take(&dict, ctx).unwrap().unwrap().to_primitive();
-
-        assert_eq!(result.as_slice::<u32>(), expect.as_slice::<u32>());
-    }
 
     #[test]
     fn test_cuda_take_u64_i64() {

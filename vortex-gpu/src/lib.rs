@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-mod bit_unpack;
+pub mod bit_unpack;
+pub mod for_;
 mod take;
+mod task;
 
+pub use bit_unpack::{cuda_bit_unpack, cuda_bit_unpack_timed};
+pub use for_::{cuda_for_unpack, cuda_for_unpack_timed};
 pub use take::cuda_take;
