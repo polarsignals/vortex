@@ -101,17 +101,7 @@ fn generate_unpack_for_width<T: FastLanes, W: Write>(
     writeln!(output, "#include <cuda.h>")?;
     writeln!(output, "#include <cuda_runtime.h>")?;
     writeln!(output, "#include <stdint.h>")?;
-    writeln!(output)?;
-
-    writeln!(
-        output,
-        "__device__ int FL_ORDER[] = {{0, 4, 2, 6, 1, 5, 3, 7}};"
-    )?;
-    writeln!(
-        output,
-        "#define INDEX(row, lane) (FL_ORDER[row / 8] * 16 + (row % 8) * 128 + lane)"
-    )?;
-    writeln!(output, "#define MASK(T, width) (((T)1 << width) - 1)")?;
+    writeln!(output, "#include \"fastlanes_common.cuh\"")?;
     writeln!(output)?;
 
     for bit_width in 0..=<T>::T {
@@ -123,10 +113,10 @@ fn generate_unpack_for_width<T: FastLanes, W: Write>(
 }
 
 pub fn generate_unpack<T: FastLanes>(output_dir: &Path, thread_count: usize) -> anyhow::Result<()> {
-    let filename = format!("fls_{}_bit_unpack.cu", T::T);
-    let path = output_dir.join(&filename);
-    let mut file = File::create(&path)?;
-    let mut writer = IndentedWriter::new(&mut file);
-    generate_unpack_for_width::<T, _>(&mut writer, thread_count)?;
+    let cu_filename = format!("gen/fls_{}_bit_unpack.cu", T::T);
+    let cu_path = output_dir.join(&cu_filename);
+    let mut cu_file = File::create(&cu_path)?;
+    let mut cu_writer = IndentedWriter::new(&mut cu_file);
+    generate_unpack_for_width::<T, _>(&mut cu_writer, thread_count)?;
     Ok(())
 }
