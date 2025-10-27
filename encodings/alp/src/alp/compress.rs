@@ -154,14 +154,12 @@ mod tests {
         let array = PrimitiveArray::new(buffer![1.234f32; 1025], Validity::NonNullable);
         let encoded = alp_encode(&array, None).unwrap();
         assert!(encoded.patches().is_none());
-        assert_eq!(
-            encoded.encoded().to_primitive().as_slice::<i32>(),
-            vec![1234; 1025]
-        );
+        let expected_encoded = PrimitiveArray::from_iter(vec![1234i32; 1025]);
+        assert_arrays_eq!(encoded.encoded(), expected_encoded);
         assert_eq!(encoded.exponents(), Exponents { e: 9, f: 6 });
 
         let decoded = decompress(&encoded);
-        assert_eq!(array.as_slice::<f32>(), decoded.as_slice::<f32>());
+        assert_arrays_eq!(decoded, array);
     }
 
     #[test]
@@ -169,15 +167,13 @@ mod tests {
         let array = PrimitiveArray::from_option_iter([None, Some(1.234f32), None]);
         let encoded = alp_encode(&array, None).unwrap();
         assert!(encoded.patches().is_none());
-        assert_eq!(
-            encoded.encoded().to_primitive().as_slice::<i32>(),
-            vec![0, 1234, 0]
-        );
+        let expected_encoded = PrimitiveArray::from_option_iter([None, Some(1234i32), None]);
+        assert_arrays_eq!(encoded.encoded(), expected_encoded);
         assert_eq!(encoded.exponents(), Exponents { e: 9, f: 6 });
 
         let decoded = decompress(&encoded);
-        let expected = vec![0f32, 1.234f32, 0f32];
-        assert_eq!(decoded.as_slice::<f32>(), expected.as_slice());
+        let expected = PrimitiveArray::from_option_iter(vec![None, Some(1.234f32), None]);
+        assert_arrays_eq!(decoded, expected);
     }
 
     #[test]
@@ -187,14 +183,13 @@ mod tests {
         let array = PrimitiveArray::new(values.clone(), Validity::NonNullable);
         let encoded = alp_encode(&array, None).unwrap();
         assert!(encoded.patches().is_some());
-        assert_eq!(
-            encoded.encoded().to_primitive().as_slice::<i64>(),
-            vec![1234i64, 2718, 1234, 4000]
-        );
+        let expected_encoded = PrimitiveArray::from_iter(vec![1234i64, 2718, 1234, 4000]);
+        assert_arrays_eq!(encoded.encoded(), expected_encoded);
         assert_eq!(encoded.exponents(), Exponents { e: 16, f: 13 });
 
         let decoded = decompress(&encoded);
-        assert_eq!(values.as_slice(), decoded.as_slice::<f64>());
+        let expected_decoded = PrimitiveArray::new(values, Validity::NonNullable);
+        assert_arrays_eq!(decoded, expected_decoded);
     }
 
     #[test]
@@ -204,10 +199,9 @@ mod tests {
         let array = PrimitiveArray::new(values, Validity::from_iter([true, true, false, true]));
         let encoded = alp_encode(&array, None).unwrap();
         assert!(encoded.patches().is_none());
-        assert_eq!(
-            encoded.encoded().to_primitive().as_slice::<i64>(),
-            vec![1234i64, 2718, 1234, 4000]
-        );
+        let expected_encoded =
+            PrimitiveArray::from_option_iter(buffer![Some(1234i64), Some(2718), None, Some(4000)]);
+        assert_arrays_eq!(encoded.encoded(), expected_encoded);
         assert_eq!(encoded.exponents(), Exponents { e: 16, f: 13 });
 
         let decoded = decompress(&encoded);
@@ -239,7 +233,7 @@ mod tests {
         let original = PrimitiveArray::from_iter([195.26274f32, 195.27837, -48.815685]);
         let alp_arr = alp_encode(&original, None).unwrap();
         let decompressed = alp_arr.to_primitive();
-        assert_eq!(original.as_slice::<f32>(), decompressed.as_slice::<f32>());
+        assert_arrays_eq!(decompressed, original);
     }
 
     #[test]
@@ -289,13 +283,16 @@ mod tests {
         let patches = encoded.patches().unwrap();
 
         let chunk_offsets = patches.chunk_offsets().clone().unwrap().to_primitive();
-        assert_eq!(chunk_offsets.as_slice::<u64>(), &[0, 1, 3]);
+        let expected_offsets = PrimitiveArray::from_iter(vec![0u64, 1, 3]);
+        assert_arrays_eq!(chunk_offsets, expected_offsets);
 
         let patch_indices = patches.indices().to_primitive();
-        assert_eq!(patch_indices.as_slice::<u64>(), &[1023, 1024, 1025]);
+        let expected_indices = PrimitiveArray::from_iter(vec![1023u64, 1024, 1025]);
+        assert_arrays_eq!(patch_indices, expected_indices);
 
         let patch_values = patches.values().to_primitive();
-        assert_eq!(patch_values.as_slice::<f64>(), &[PI, E, PI]);
+        let expected_values = PrimitiveArray::from_iter(vec![PI, E, PI]);
+        assert_arrays_eq!(patch_values, expected_values);
     }
 
     #[test]
@@ -309,13 +306,16 @@ mod tests {
         let patches = encoded.patches().unwrap();
 
         let chunk_offsets = patches.chunk_offsets().clone().unwrap().to_primitive();
-        assert_eq!(chunk_offsets.as_slice::<u64>(), &[0, 1, 1]);
+        let expected_offsets = PrimitiveArray::from_iter(vec![0u64, 1, 1]);
+        assert_arrays_eq!(chunk_offsets, expected_offsets);
 
         let patch_indices = patches.indices().to_primitive();
-        assert_eq!(patch_indices.as_slice::<u64>(), &[0, 2048]);
+        let expected_indices = PrimitiveArray::from_iter(vec![0u64, 2048]);
+        assert_arrays_eq!(patch_indices, expected_indices);
 
         let patch_values = patches.values().to_primitive();
-        assert_eq!(patch_values.as_slice::<f64>(), &[PI, E]);
+        let expected_values = PrimitiveArray::from_iter(vec![PI, E]);
+        assert_arrays_eq!(patch_values, expected_values);
     }
 
     #[test]
@@ -328,13 +328,16 @@ mod tests {
         let patches = encoded.patches().unwrap();
 
         let chunk_offsets = patches.chunk_offsets().clone().unwrap().to_primitive();
-        assert_eq!(chunk_offsets.as_slice::<u64>(), &[0, 1, 1]);
+        let expected_offsets = PrimitiveArray::from_iter(vec![0u64, 1, 1]);
+        assert_arrays_eq!(chunk_offsets, expected_offsets);
 
         let patch_indices = patches.indices().to_primitive();
-        assert_eq!(patch_indices.as_slice::<u64>(), &[0]);
+        let expected_indices = PrimitiveArray::from_iter(vec![0u64]);
+        assert_arrays_eq!(patch_indices, expected_indices);
 
         let patch_values = patches.values().to_primitive();
-        assert_eq!(patch_values.as_slice::<f64>(), &[PI]);
+        let expected_values = PrimitiveArray::from_iter(vec![PI]);
+        assert_arrays_eq!(patch_values, expected_values);
     }
 
     #[test]
@@ -348,12 +351,15 @@ mod tests {
         let patches = encoded.patches().unwrap();
 
         let chunk_offsets = patches.chunk_offsets().clone().unwrap().to_primitive();
-        assert_eq!(chunk_offsets.as_slice::<u64>(), &[0]);
+        let expected_offsets = PrimitiveArray::from_iter(vec![0u64]);
+        assert_arrays_eq!(chunk_offsets, expected_offsets);
 
         let patch_indices = patches.indices().to_primitive();
-        assert_eq!(patch_indices.as_slice::<u64>(), &[0, 100]);
+        let expected_indices = PrimitiveArray::from_iter(vec![0u64, 100]);
+        assert_arrays_eq!(patch_indices, expected_indices);
 
         let patch_values = patches.values().to_primitive();
-        assert_eq!(patch_values.as_slice::<f64>(), &[PI, E]);
+        let expected_values = PrimitiveArray::from_iter(vec![PI, E]);
+        assert_arrays_eq!(patch_values, expected_values);
     }
 }
