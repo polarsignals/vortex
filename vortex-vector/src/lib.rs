@@ -6,7 +6,6 @@
 //! Immutable and mutable decompressed (canonical) vectors for Vortex.
 
 #![deny(missing_docs)]
-#![deny(clippy::missing_docs_in_private_items)]
 #![deny(clippy::missing_errors_doc)]
 #![deny(clippy::missing_panics_doc)]
 #![deny(clippy::missing_safety_doc)]
@@ -15,11 +14,13 @@ mod bool;
 mod null;
 mod primitive;
 mod struct_;
+mod varbin;
 
-pub use bool::{BoolVector, BoolVectorMut};
-pub use null::{NullVector, NullVectorMut};
-pub use primitive::{PVector, PVectorMut, PrimitiveVector, PrimitiveVectorMut};
-pub use struct_::{StructVector, StructVectorMut};
+pub use bool::*;
+pub use null::*;
+pub use primitive::*;
+pub use struct_::*;
+pub use varbin::*;
 
 mod ops;
 mod vector;
