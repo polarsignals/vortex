@@ -115,7 +115,8 @@ impl<T: BinaryViewType> BinaryViewVectorMut<T> {
     /// Append a repeated sequence of binary data to a vector.
     ///
     /// ```
-    /// # use vortex_vector::{StringVectorMut, VectorMutOps};
+    /// # use vortex_vector::binaryview::StringVectorMut;
+    /// # use vortex_vector::VectorMutOps;
     /// let mut strings = StringVectorMut::with_capacity(4);
     /// strings.append_values("inlined", 2);
     /// strings.append_nulls(1);
@@ -228,7 +229,8 @@ mod tests {
     use vortex_mask::{Mask, MaskMut};
 
     use crate::binaryview::view::BinaryView;
-    use crate::{StringVector, StringVectorMut, VectorMutOps, VectorOps};
+    use crate::binaryview::{StringVector, StringVectorMut};
+    use crate::{VectorMutOps, VectorOps};
 
     #[test]
     fn test_basic() {

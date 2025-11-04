@@ -8,14 +8,13 @@ use std::sync::Arc;
 use vortex_error::{VortexExpect, VortexResult, vortex_ensure};
 use vortex_mask::Mask;
 
-use crate::{StructVectorMut, Vector, VectorMutOps, VectorOps};
+use crate::struct_::StructVectorMut;
+use crate::{Vector, VectorMutOps, VectorOps};
 
 /// An immutable vector of struct values.
 ///
-/// `StructVector` can be considered a borrowed / frozen version of [`StructVectorMut`], which is
-/// created via the [`freeze`](crate::VectorMutOps::freeze) method.
-///
-/// See the documentation for [`StructVectorMut`] for more information.
+/// Struct values are stored column-wise in the vector, so values in the same field are stored next
+/// to each other (rather than values in the same struct stored next to each other).
 #[derive(Debug, Clone)]
 pub struct StructVector {
     /// The fields of the `StructVector`, each stored column-wise as a [`Vector`].
