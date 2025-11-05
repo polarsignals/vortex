@@ -133,7 +133,7 @@ impl ComputeFnVTable for Like {
 }
 
 /// Options for SQL LIKE function
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LikeOptions {
     pub negated: bool,
     pub case_insensitive: bool,

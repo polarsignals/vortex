@@ -3,17 +3,23 @@
 
 use vortex_error::{VortexResult, vortex_err};
 
+use crate::exprs::get_item::get_item;
+use crate::exprs::pack::pack;
+use crate::exprs::select::Select;
 use crate::traversal::{NodeExt, Transformed};
-use crate::{DType, ExprRef, SelectVTable, get_item, pack};
+use crate::{DType, Expression};
 
 /// Replaces [crate::SelectExpr] with combination of [crate::GetItem] and [crate::Pack] expressions.
-pub(crate) fn remove_select(e: ExprRef, ctx: &DType) -> VortexResult<ExprRef> {
+pub(crate) fn remove_select(e: Expression, ctx: &DType) -> VortexResult<Expression> {
     e.transform_up(|node| remove_select_transformer(node, ctx))
         .map(|e| e.into_inner())
 }
 
-fn remove_select_transformer(node: ExprRef, ctx: &DType) -> VortexResult<Transformed<ExprRef>> {
-    match node.as_opt::<SelectVTable>() {
+fn remove_select_transformer(
+    node: Expression,
+    ctx: &DType,
+) -> VortexResult<Transformed<Expression>> {
+    match node.as_opt::<Select>() {
         None => Ok(Transformed::no(node)),
         Some(select) => {
             let child = select.child();
@@ -29,12 +35,12 @@ fn remove_select_transformer(node: ExprRef, ctx: &DType) -> VortexResult<Transfo
 
             let expr = pack(
                 select
-                    .selection()
+                    .data()
                     .as_include_names(child_dtype.names())
                     .map_err(|e| {
                         e.with_context(format!(
                             "Select fields {:?} must be a subset of child fields {:?}",
-                            select.selection(),
+                            select.data(),
                             child_dtype.names()
                         ))
                     })?
@@ -50,13 +56,14 @@ fn remove_select_transformer(node: ExprRef, ctx: &DType) -> VortexResult<Transfo
 
 #[cfg(test)]
 mod tests {
-
     use vortex_dtype::Nullability::Nullable;
     use vortex_dtype::PType::I32;
     use vortex_dtype::{DType, StructFields};
 
-    use crate::transform::remove_select::remove_select;
-    use crate::{PackVTable, root, select};
+    use super::remove_select;
+    use crate::exprs::pack::Pack;
+    use crate::exprs::root::root;
+    use crate::exprs::select::select;
 
     #[test]
     fn test_remove_select() {
@@ -67,7 +74,7 @@ mod tests {
         let e = select(["a", "b"], root());
         let e = remove_select(e, &dtype).unwrap();
 
-        assert!(e.is::<PackVTable>());
+        assert!(e.is::<Pack>());
         assert!(e.return_dtype(&dtype).unwrap().is_nullable());
     }
 }

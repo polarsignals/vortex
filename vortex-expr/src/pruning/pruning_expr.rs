@@ -9,7 +9,9 @@ use vortex_dtype::{Field, FieldName, FieldPath, FieldPathSet};
 use vortex_utils::aliases::hash_map::HashMap;
 
 use super::relation::Relation;
-use crate::{ExprRef, StatsCatalog, get_item, root};
+use crate::exprs::get_item::get_item;
+use crate::exprs::root::root;
+use crate::{Expression, StatsCatalog};
 
 pub type RequiredStats = Relation<FieldPath, Stat>;
 
@@ -17,13 +19,13 @@ pub type RequiredStats = Relation<FieldPath, Stat>;
 // stats and returning them later.
 #[derive(Default)]
 struct TrackingStatsCatalog {
-    usage: HashMap<(FieldPath, Stat), ExprRef>,
+    usage: HashMap<(FieldPath, Stat), Expression>,
 }
 
 impl TrackingStatsCatalog {
     /// Consume the catalog, yielding a map of field statistics that were required
     /// for each expression.
-    fn into_usages(self) -> HashMap<(FieldPath, Stat), ExprRef> {
+    fn into_usages(self) -> HashMap<(FieldPath, Stat), Expression> {
         self.usage
     }
 }
@@ -35,7 +37,7 @@ struct ScopeStatsCatalog<'a> {
 }
 
 impl StatsCatalog for ScopeStatsCatalog<'_> {
-    fn stats_ref(&mut self, field_path: &FieldPath, stat: Stat) -> Option<ExprRef> {
+    fn stats_ref(&mut self, field_path: &FieldPath, stat: Stat) -> Option<Expression> {
         let stat_path = field_path.clone().push(stat.name());
 
         if self.available_stats.contains(&stat_path) {
@@ -47,7 +49,7 @@ impl StatsCatalog for ScopeStatsCatalog<'_> {
 }
 
 impl StatsCatalog for TrackingStatsCatalog {
-    fn stats_ref(&mut self, field_path: &FieldPath, stat: Stat) -> Option<ExprRef> {
+    fn stats_ref(&mut self, field_path: &FieldPath, stat: Stat) -> Option<Expression> {
         let mut expr = root();
         let name = field_path_stat_field_name(field_path, stat);
         expr = get_item(name, expr);
@@ -80,9 +82,9 @@ pub fn field_path_stat_field_name(field_path: &FieldPath, stat: Stat) -> FieldNa
 /// If the falsification logic attempts to access an unknown stat,
 /// this function will return `None`.
 pub fn checked_pruning_expr(
-    expr: &ExprRef,
+    expr: &Expression,
     available_stats: &FieldPathSet,
-) -> Option<(ExprRef, RequiredStats)> {
+) -> Option<(Expression, RequiredStats)> {
     let mut catalog = ScopeStatsCatalog {
         any_catalog: Default::default(),
         available_stats,
@@ -108,11 +110,15 @@ mod tests {
         DType, FieldName, FieldNames, FieldPath, FieldPathSet, Nullability, StructFields,
     };
 
-    use crate::pruning::pruning_expr::HashMap;
+    use super::HashMap;
+    use crate::HashSet;
+    use crate::exprs::between::between;
+    use crate::exprs::binary::{and, eq, gt, gt_eq, lt, lt_eq, not_eq, or};
+    use crate::exprs::cast::cast;
+    use crate::exprs::get_item::{col, get_item};
+    use crate::exprs::literal::lit;
+    use crate::exprs::root::root;
     use crate::pruning::{checked_pruning_expr, field_path_stat_field_name};
-    use crate::{
-        HashSet, and, between, cast, col, eq, get_item, gt, gt_eq, lit, lt, lt_eq, not_eq, or, root,
-    };
 
     // Implement some checked pruning expressions.
     #[fixture]
@@ -249,7 +255,7 @@ mod tests {
         let column = FieldName::from("a");
         let other_col = FieldName::from("b");
         let other_expr = col(other_col.clone());
-        let not_eq_expr = gt(col(column.clone()), other_expr.clone());
+        let not_eq_expr = gt(col(column.clone()), other_expr);
 
         let (converted, refs) = checked_pruning_expr(&not_eq_expr, &available_stats).unwrap();
         assert_eq!(
@@ -297,7 +303,7 @@ mod tests {
                 &FieldPath::from_name(column),
                 Stat::Max,
             )),
-            other_col.clone(),
+            other_col,
         );
         assert_eq!(&converted, &(expected_expr));
     }
@@ -307,7 +313,7 @@ mod tests {
         let column = FieldName::from("a");
         let other_col = FieldName::from("b");
         let other_expr = col(other_col.clone());
-        let not_eq_expr = lt(col(column.clone()), other_expr.clone());
+        let not_eq_expr = lt(col(column.clone()), other_expr);
 
         let (converted, refs) = checked_pruning_expr(&not_eq_expr, &available_stats).unwrap();
         assert_eq!(
@@ -352,7 +358,7 @@ mod tests {
 
     #[rstest]
     fn pruning_identity(available_stats: FieldPathSet) {
-        let expr = or(lt(col("a").clone(), lit(10)), gt(col("a").clone(), lit(50)));
+        let expr = or(lt(col("a"), lit(10)), gt(col("a"), lit(50)));
 
         let (predicate, _) = checked_pruning_expr(&expr, &available_stats).unwrap();
 

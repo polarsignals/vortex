@@ -1,140 +1,117 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use std::fmt::Formatter;
+use std::ops::Deref;
+
+use prost::Message;
+use vortex_array::ArrayRef;
 use vortex_array::compute::cast as compute_cast;
-use vortex_array::{ArrayRef, DeserializeMetadata, ProstMetadata};
 use vortex_dtype::{DType, FieldPath};
-use vortex_error::{VortexResult, vortex_bail, vortex_err};
+use vortex_error::{VortexExpect, VortexResult, vortex_bail, vortex_err};
 use vortex_proto::expr as pb;
 
-use crate::display::{DisplayAs, DisplayFormat};
-use crate::{
-    AnalysisExpr, ExprEncodingRef, ExprId, ExprRef, IntoExpr, Scope, StatsCatalog, VTable, vtable,
-};
+use crate::expression::Expression;
+use crate::{ChildName, ExprId, ExpressionView, StatsCatalog, VTable, VTableExt};
 
-vtable!(Cast);
+/// A cast expression that converts values to a target data type.
+pub struct Cast;
 
-#[allow(clippy::derived_hash_with_manual_eq)]
-#[derive(Debug, Clone, Hash, Eq)]
-pub struct CastExpr {
-    target: DType,
-    child: ExprRef,
-}
+impl VTable for Cast {
+    type Instance = DType;
 
-impl PartialEq for CastExpr {
-    fn eq(&self, other: &Self) -> bool {
-        self.target == other.target && self.child.eq(&other.child)
-    }
-}
-
-pub struct CastExprEncoding;
-
-impl VTable for CastVTable {
-    type Expr = CastExpr;
-    type Encoding = CastExprEncoding;
-    type Metadata = ProstMetadata<pb::CastOpts>;
-
-    fn id(_encoding: &Self::Encoding) -> ExprId {
-        ExprId::new_ref("cast")
+    fn id(&self) -> ExprId {
+        ExprId::from("vortex.cast")
     }
 
-    fn encoding(_expr: &Self::Expr) -> ExprEncodingRef {
-        ExprEncodingRef::new_ref(CastExprEncoding.as_ref())
+    fn serialize(&self, instance: &Self::Instance) -> VortexResult<Option<Vec<u8>>> {
+        Ok(Some(
+            pb::CastOpts {
+                target: Some(instance.into()),
+            }
+            .encode_to_vec(),
+        ))
     }
 
-    fn metadata(expr: &Self::Expr) -> Option<Self::Metadata> {
-        Some(ProstMetadata(pb::CastOpts {
-            target: Some((&expr.target).into()),
-        }))
+    fn deserialize(&self, metadata: &[u8]) -> VortexResult<Option<Self::Instance>> {
+        Ok(Some(
+            pb::CastOpts::decode(metadata)?
+                .target
+                .as_ref()
+                .ok_or_else(|| vortex_err!("Missing target dtype in Cast expression"))?
+                .try_into()?,
+        ))
     }
 
-    fn children(expr: &Self::Expr) -> Vec<&ExprRef> {
-        vec![&expr.child]
-    }
-
-    fn with_children(expr: &Self::Expr, children: Vec<ExprRef>) -> VortexResult<Self::Expr> {
-        Ok(CastExpr {
-            target: expr.target.clone(),
-            child: children[0].clone(),
-        })
-    }
-
-    fn build(
-        _encoding: &Self::Encoding,
-        metadata: &<Self::Metadata as DeserializeMetadata>::Output,
-        children: Vec<ExprRef>,
-    ) -> VortexResult<Self::Expr> {
-        if children.len() != 1 {
+    fn validate(&self, expr: &ExpressionView<Self>) -> VortexResult<()> {
+        if expr.children().len() != 1 {
             vortex_bail!(
-                "Cast expression must have exactly 1 child, got {}",
-                children.len()
+                "Cast expression requires exactly 1 child, got {}",
+                expr.children().len()
             );
         }
-        let target: DType = metadata
-            .target
-            .as_ref()
-            .ok_or_else(|| vortex_err!("missing target dtype in CastOpts"))?
-            .try_into()?;
-        Ok(CastExpr {
-            target,
-            child: children[0].clone(),
-        })
+        Ok(())
     }
 
-    fn evaluate(expr: &Self::Expr, scope: &Scope) -> VortexResult<ArrayRef> {
-        let array = expr.child.evaluate(scope)?;
-        compute_cast(&array, &expr.target).map_err(|e| {
+    fn child_name(&self, _instance: &Self::Instance, child_idx: usize) -> ChildName {
+        match child_idx {
+            0 => ChildName::from("input"),
+            _ => unreachable!("Invalid child index {} for Cast expression", child_idx),
+        }
+    }
+
+    fn fmt_sql(&self, expr: &ExpressionView<Self>, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "cast(")?;
+        expr.children()[0].fmt_sql(f)?;
+        write!(f, " as {}", expr.data())?;
+        write!(f, ")")
+    }
+
+    fn fmt_data(&self, instance: &Self::Instance, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", instance)
+    }
+
+    fn return_dtype(&self, expr: &ExpressionView<Self>, _scope: &DType) -> VortexResult<DType> {
+        Ok(expr.data().clone())
+    }
+
+    fn evaluate(&self, expr: &ExpressionView<Self>, scope: &ArrayRef) -> VortexResult<ArrayRef> {
+        let array = expr.children()[0].evaluate(scope)?;
+        compute_cast(&array, expr.data()).map_err(|e| {
             e.with_context(format!(
                 "Failed to cast array of dtype {} to {}",
                 array.dtype(),
-                expr.target
+                expr.deref()
             ))
         })
     }
 
-    fn return_dtype(expr: &Self::Expr, _scope: &DType) -> VortexResult<DType> {
-        Ok(expr.target.clone())
-    }
-}
-
-impl CastExpr {
-    pub fn new(child: ExprRef, target: DType) -> Self {
-        Self { target, child }
+    fn stat_max(
+        &self,
+        expr: &ExpressionView<Self>,
+        catalog: &mut dyn StatsCatalog,
+    ) -> Option<Expression> {
+        expr.children()[0].stat_max(catalog)
     }
 
-    pub fn new_expr(child: ExprRef, target: DType) -> ExprRef {
-        Self::new(child, target).into_expr()
-    }
-}
-
-impl DisplayAs for CastExpr {
-    fn fmt_as(&self, df: DisplayFormat, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match df {
-            DisplayFormat::Compact => {
-                write!(f, "cast({}, {})", self.child, self.target)
-            }
-            DisplayFormat::Tree => {
-                write!(f, "Cast(target: {})", self.target)
-            }
-        }
-    }
-}
-
-impl AnalysisExpr for CastExpr {
-    fn max(&self, catalog: &mut dyn StatsCatalog) -> Option<ExprRef> {
-        self.child.max(catalog)
+    fn stat_min(
+        &self,
+        expr: &ExpressionView<Self>,
+        catalog: &mut dyn StatsCatalog,
+    ) -> Option<Expression> {
+        expr.children()[0].stat_min(catalog)
     }
 
-    fn min(&self, catalog: &mut dyn StatsCatalog) -> Option<ExprRef> {
-        self.child.min(catalog)
+    fn stat_nan_count(
+        &self,
+        expr: &ExpressionView<Self>,
+        catalog: &mut dyn StatsCatalog,
+    ) -> Option<Expression> {
+        expr.children()[0].stat_nan_count(catalog)
     }
 
-    fn nan_count(&self, catalog: &mut dyn StatsCatalog) -> Option<ExprRef> {
-        self.child.nan_count(catalog)
-    }
-
-    fn field_path(&self) -> Option<FieldPath> {
-        self.child.field_path()
+    fn stat_field_path(&self, expr: &ExpressionView<Self>) -> Option<FieldPath> {
+        expr.children()[0].stat_field_path()
     }
 }
 
@@ -147,8 +124,9 @@ impl AnalysisExpr for CastExpr {
 /// # use vortex_expr::{cast, root};
 /// let expr = cast(root(), DType::Primitive(PType::I64, Nullability::NonNullable));
 /// ```
-pub fn cast(child: ExprRef, target: DType) -> ExprRef {
-    CastExpr::new(child, target).into_expr()
+pub fn cast(child: Expression, target: DType) -> Expression {
+    Cast.try_new_expr(target, [child])
+        .vortex_expect("Failed to create Cast expression")
 }
 
 #[cfg(test)]
@@ -158,7 +136,10 @@ mod tests {
     use vortex_buffer::buffer;
     use vortex_dtype::{DType, Nullability, PType};
 
-    use crate::{ExprRef, Scope, cast, get_item, root, test_harness};
+    use super::cast;
+    use crate::exprs::get_item::get_item;
+    use crate::exprs::root::root;
+    use crate::{Expression, Scope, test_harness};
 
     #[test]
     fn dtype() {
@@ -174,7 +155,7 @@ mod tests {
     #[test]
     fn replace_children() {
         let expr = cast(root(), DType::Bool(Nullability::Nullable));
-        let _ = expr.with_children(vec![root()]);
+        let _ = expr.with_children([root()]);
     }
 
     #[test]
@@ -186,7 +167,7 @@ mod tests {
         .unwrap()
         .into_array();
 
-        let expr: ExprRef = cast(
+        let expr: Expression = cast(
             get_item("a", root()),
             DType::Primitive(PType::I64, Nullability::NonNullable),
         );
@@ -204,9 +185,9 @@ mod tests {
             get_item("value", root()),
             DType::Primitive(PType::I64, Nullability::NonNullable),
         );
-        assert_eq!(expr.to_string(), "cast($.value, i64)");
+        assert_eq!(expr.to_string(), "cast($.value as i64)");
 
         let expr2 = cast(root(), DType::Bool(Nullability::Nullable));
-        assert_eq!(expr2.to_string(), "cast($, bool?)");
+        assert_eq!(expr2.to_string(), "cast($ as bool?)");
     }
 }

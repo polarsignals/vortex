@@ -96,8 +96,8 @@ impl FieldPath {
     }
 
     /// Constructs a new `FieldPath` from a single field selector (i.e., a direct child field of the top-level struct)
-    pub fn from_name<F: Into<Field>>(name: F) -> Self {
-        Self(vec![name.into()])
+    pub fn from_name<F: Into<FieldName>>(name: F) -> Self {
+        Self(vec![Field::Name(name.into())])
     }
 
     /// Returns the sequence of field selectors that make up this path
@@ -338,10 +338,7 @@ mod tests {
         assert!(path.resolve(level1.clone()).is_none());
         assert!(!path.exists_in(level1.clone()));
 
-        let path = FieldPath::from_name(Field::ElementType)
-            .push("a")
-            .push("b")
-            .push("c");
+        let path = FieldPath::root().push("a").push("b").push("c");
         assert!(path.resolve(level1.clone()).is_none());
         assert!(!path.exists_in(level1));
     }

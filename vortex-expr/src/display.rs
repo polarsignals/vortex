@@ -1,50 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use std::fmt::{Display, Formatter};
+
+use crate::Expression;
+
 pub enum DisplayFormat {
     Compact,
     Tree,
 }
 
-/// Configurable display trait for expressions.
-pub trait DisplayAs {
-    fn fmt_as(&self, df: DisplayFormat, f: &mut std::fmt::Formatter) -> std::fmt::Result;
+pub struct DisplayTreeExpr<'a>(pub &'a Expression);
 
-    fn child_names(&self) -> Option<Vec<String>> {
-        None
-    }
-}
-
-pub struct DisplayTreeExpr<'a>(pub &'a dyn crate::VortexExpr);
-
-impl std::fmt::Display for DisplayTreeExpr<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for DisplayTreeExpr<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         pub use termtree::Tree;
-        fn make_tree(expr: &dyn crate::VortexExpr) -> Result<Tree<String>, std::fmt::Error> {
-            let node_name = TreeNodeDisplay(expr).to_string();
+        fn make_tree(expr: &Expression) -> Result<Tree<String>, std::fmt::Error> {
+            let node_name = format!("{}", ExpressionDebug(expr));
 
             // Get child names for display purposes
-            let child_names = DisplayAs::child_names(expr);
+            let child_names = (0..expr.children().len()).map(|i| expr.child_name(i));
             let children = expr.children();
 
-            let child_trees: Result<Vec<Tree<String>>, _> = if let Some(names) = child_names
-                && names.len() == children.len()
-            {
-                children
-                    .iter()
-                    .zip(names.iter())
-                    .map(|(child, name)| {
-                        let child_tree = make_tree(child.as_ref())?;
-                        Ok(Tree::new(format!("{}: {}", name, child_tree.root))
-                            .with_leaves(child_tree.leaves))
-                    })
-                    .collect()
-            } else {
-                children
-                    .iter()
-                    .map(|child| make_tree(child.as_ref()))
-                    .collect()
-            };
+            let child_trees: Result<Vec<Tree<String>>, _> = children
+                .iter()
+                .zip(child_names)
+                .map(|(child, name)| {
+                    let child_tree = make_tree(child)?;
+                    Ok(Tree::new(format!("{}: {}", name, child_tree.root))
+                        .with_leaves(child_tree.leaves))
+                })
+                .collect();
 
             Ok(Tree::new(node_name).with_leaves(child_trees?))
         }
@@ -53,11 +39,15 @@ impl std::fmt::Display for DisplayTreeExpr<'_> {
     }
 }
 
-struct TreeNodeDisplay<'a>(&'a dyn crate::VortexExpr);
-
-impl<'a> std::fmt::Display for TreeNodeDisplay<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt_as(DisplayFormat::Tree, f)
+struct ExpressionDebug<'a>(&'a Expression);
+impl Display for ExpressionDebug<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // Special-case when expression has no data to avoid trailing space.
+        if self.0.data().is::<()>() {
+            return write!(f, "{}", self.0.id().as_ref());
+        }
+        write!(f, "{} ", self.0.id().as_ref())?;
+        self.0.vtable().as_dyn().fmt_data(self.0.data().as_ref(), f)
     }
 }
 
@@ -66,7 +56,15 @@ mod tests {
     use vortex_array::compute::{BetweenOptions, StrictComparison};
     use vortex_dtype::{DType, Nullability, PType};
 
-    use crate::{and, between, cast, eq, get_item, gt, lit, not, root, select};
+    use crate::exprs::between::between;
+    use crate::exprs::binary::{and, eq, gt};
+    use crate::exprs::cast::cast;
+    use crate::exprs::get_item::get_item;
+    use crate::exprs::literal::lit;
+    use crate::exprs::not::not;
+    use crate::exprs::pack::pack;
+    use crate::exprs::root::root;
+    use crate::exprs::select::{select, select_exclude};
 
     #[test]
     fn tree_display_getitem() {
@@ -102,73 +100,72 @@ mod tests {
     fn test_display_tree() {
         use insta::assert_snapshot;
 
-        use crate::{pack, select_exclude};
         let root_expr = root();
-        assert_snapshot!(root_expr.display_tree().to_string(), @"Root");
+        assert_snapshot!(root_expr.display_tree().to_string(), @"vortex.root");
 
         let lit_expr = lit(42);
-        assert_snapshot!(lit_expr.display_tree().to_string(), @"Literal(value: 42i32, dtype: i32)");
+        assert_snapshot!(lit_expr.display_tree().to_string(), @"vortex.literal 42i32");
 
         let get_item_expr = get_item("my_field", root());
-        assert_snapshot!(get_item_expr.display_tree().to_string(), @r"
-        GetItem(my_field)
-        └── Root
-        ");
+        assert_snapshot!(get_item_expr.display_tree().to_string(), @r#"
+        vortex.get_item "my_field"
+        └── input: vortex.root
+        "#);
 
         let binary_expr = gt(get_item("x", root()), lit(10));
-        assert_snapshot!(binary_expr.display_tree().to_string(), @r"
-        Binary(>)
-        ├── lhs: GetItem(x)
-        │   └── Root
-        └── rhs: Literal(value: 10i32, dtype: i32)
-        ");
+        assert_snapshot!(binary_expr.display_tree().to_string(), @r#"
+        vortex.binary >
+        ├── lhs: vortex.get_item "x"
+        │   └── input: vortex.root
+        └── rhs: vortex.literal 10i32
+        "#);
 
         let complex_binary = and(
             eq(get_item("name", root()), lit("alice")),
             gt(get_item("age", root()), lit(18)),
         );
         assert_snapshot!(complex_binary.display_tree().to_string(), @r#"
-        Binary(and)
-        ├── lhs: Binary(=)
-        │   ├── lhs: GetItem(name)
-        │   │   └── Root
-        │   └── rhs: Literal(value: "alice", dtype: utf8)
-        └── rhs: Binary(>)
-            ├── lhs: GetItem(age)
-            │   └── Root
-            └── rhs: Literal(value: 18i32, dtype: i32)
+        vortex.binary and
+        ├── lhs: vortex.binary =
+        │   ├── lhs: vortex.get_item "name"
+        │   │   └── input: vortex.root
+        │   └── rhs: vortex.literal "alice"
+        └── rhs: vortex.binary >
+            ├── lhs: vortex.get_item "age"
+            │   └── input: vortex.root
+            └── rhs: vortex.literal 18i32
         "#);
 
         let select_expr = select(["name", "age"], root());
-        assert_snapshot!(select_expr.display_tree().to_string(), @r#"
-        Select(include): ["name", "age"]
-        └── Root
-        "#);
+        assert_snapshot!(select_expr.display_tree().to_string(), @r"
+        vortex.select include={name, age}
+        └── child: vortex.root
+        ");
 
         let select_exclude_expr = select_exclude(["internal_id", "metadata"], root());
-        assert_snapshot!(select_exclude_expr.display_tree().to_string(), @r#"
-        Select(exclude): ["internal_id", "metadata"]
-        └── Root
-        "#);
+        assert_snapshot!(select_exclude_expr.display_tree().to_string(), @r"
+        vortex.select exclude={internal_id, metadata}
+        └── child: vortex.root
+        ");
 
         let cast_expr = cast(
             get_item("value", root()),
             DType::Primitive(PType::I64, Nullability::NonNullable),
         );
-        assert_snapshot!(cast_expr.display_tree().to_string(), @r"
-        Cast(target: i64)
-        └── GetItem(value)
-            └── Root
-        ");
+        assert_snapshot!(cast_expr.display_tree().to_string(), @r#"
+        vortex.cast i64
+        └── input: vortex.get_item "value"
+            └── input: vortex.root
+        "#);
 
         let not_expr = not(eq(get_item("active", root()), lit(true)));
-        assert_snapshot!(not_expr.display_tree().to_string(), @r"
-        Not
-        └── Binary(=)
-            ├── lhs: GetItem(active)
-            │   └── Root
-            └── rhs: Literal(value: true, dtype: bool)
-        ");
+        assert_snapshot!(not_expr.display_tree().to_string(), @r#"
+        vortex.not
+        └── input: vortex.binary =
+            ├── lhs: vortex.get_item "active"
+            │   └── input: vortex.root
+            └── rhs: vortex.literal true
+        "#);
 
         let between_expr = between(
             get_item("score", root()),
@@ -179,13 +176,13 @@ mod tests {
                 upper_strict: StrictComparison::NonStrict,
             },
         );
-        assert_snapshot!(between_expr.display_tree().to_string(), @r"
-        Between
-        ├── array: GetItem(score)
-        │   └── Root
-        ├── lower (NonStrict): Literal(value: 0i32, dtype: i32)
-        └── upper (NonStrict): Literal(value: 100i32, dtype: i32)
-        ");
+        assert_snapshot!(between_expr.display_tree().to_string(), @r#"
+        vortex.between BetweenOptions { lower_strict: NonStrict, upper_strict: NonStrict }
+        ├── array: vortex.get_item "score"
+        │   └── input: vortex.root
+        ├── lower: vortex.literal 0i32
+        └── upper: vortex.literal 100i32
+        "#);
 
         // Test nested expression
         let nested_expr = select(
@@ -204,13 +201,13 @@ mod tests {
             ),
         );
         assert_snapshot!(nested_expr.display_tree().to_string(), @r#"
-        Select(include): ["result"]
-        └── Cast(target: bool)
-            └── Between
-                ├── array: GetItem(score)
-                │   └── Root
-                ├── lower (Strict): Literal(value: 50i32, dtype: i32)
-                └── upper (NonStrict): Literal(value: 100i32, dtype: i32)
+        vortex.select include={result}
+        └── child: vortex.cast bool
+            └── input: vortex.between BetweenOptions { lower_strict: Strict, upper_strict: NonStrict }
+                ├── array: vortex.get_item "score"
+                │   └── input: vortex.root
+                ├── lower: vortex.literal 50i32
+                └── upper: vortex.literal 100i32
         "#);
 
         let select_from_pack_expr = select(
@@ -225,14 +222,14 @@ mod tests {
             ),
         );
         assert_snapshot!(select_from_pack_expr.display_tree().to_string(), @r#"
-        Select(include): ["fizz", "buzz"]
-        └── Pack
-            ├── fizz: Root
-            ├── bar: Literal(value: 5i32, dtype: i32)
-            └── buzz: Binary(=)
-                ├── lhs: Literal(value: 42i32, dtype: i32)
-                └── rhs: GetItem(answer)
-                    └── Root
+        vortex.select include={fizz, buzz}
+        └── child: vortex.pack PackOptions { names: FieldNames([FieldName("fizz"), FieldName("bar"), FieldName("buzz")]), nullability: Nullable }
+            ├── fizz: vortex.root
+            ├── bar: vortex.literal 5i32
+            └── buzz: vortex.binary =
+                ├── lhs: vortex.literal 42i32
+                └── rhs: vortex.get_item "answer"
+                    └── input: vortex.root
         "#);
     }
 }

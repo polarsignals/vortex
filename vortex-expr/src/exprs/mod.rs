@@ -4,7 +4,7 @@
 pub(crate) mod between;
 pub(crate) mod binary;
 pub(crate) mod cast;
-pub mod dynamic;
+pub(crate) mod dynamic;
 pub(crate) mod get_item;
 pub(crate) mod is_null;
 pub(crate) mod like;
@@ -16,3 +16,19 @@ pub(crate) mod operators;
 pub(crate) mod pack;
 pub(crate) mod root;
 pub(crate) mod select;
+
+pub use between::*;
+pub use binary::*;
+pub use cast::*;
+pub use dynamic::*;
+pub use get_item::*;
+pub use is_null::*;
+pub use like::*;
+pub use list_contains::*;
+pub use literal::*;
+pub use merge::*;
+pub use not::*;
+pub use operators::*;
+pub use pack::*;
+pub use root::*;
+pub use select::*;

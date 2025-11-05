@@ -1,168 +1,141 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-use std::hash::Hash;
+use std::fmt::Formatter;
 
-use vortex_array::compute::{LikeOptions, like};
-use vortex_array::{ArrayRef, DeserializeMetadata, ProstMetadata};
+use prost::Message;
+use vortex_array::ArrayRef;
+use vortex_array::compute::{LikeOptions, like as like_compute};
 use vortex_dtype::DType;
 use vortex_error::{VortexResult, vortex_bail};
 use vortex_proto::expr as pb;
 
-use crate::display::{DisplayAs, DisplayFormat};
-use crate::{AnalysisExpr, ExprEncodingRef, ExprId, ExprRef, IntoExpr, Scope, VTable, vtable};
+use crate::{ChildName, ExprId, Expression, ExpressionView, VTable, VTableExt};
 
-vtable!(Like);
+/// Expression that performs SQL LIKE pattern matching.
+pub struct Like;
 
-#[allow(clippy::derived_hash_with_manual_eq)]
-#[derive(Clone, Debug, Hash, Eq)]
-pub struct LikeExpr {
-    child: ExprRef,
-    pattern: ExprRef,
-    negated: bool,
-    case_insensitive: bool,
-}
+impl VTable for Like {
+    type Instance = LikeOptions;
 
-impl PartialEq for LikeExpr {
-    fn eq(&self, other: &Self) -> bool {
-        self.child.eq(&other.child)
-            && self.pattern.eq(&other.pattern)
-            && self.negated == other.negated
-            && self.case_insensitive == other.case_insensitive
-    }
-}
-
-pub struct LikeExprEncoding;
-
-impl VTable for LikeVTable {
-    type Expr = LikeExpr;
-    type Encoding = LikeExprEncoding;
-    type Metadata = ProstMetadata<pb::LikeOpts>;
-
-    fn id(_encoding: &Self::Encoding) -> ExprId {
-        ExprId::new_ref("like")
+    fn id(&self) -> ExprId {
+        ExprId::from("vortex.like")
     }
 
-    fn encoding(_expr: &Self::Expr) -> ExprEncodingRef {
-        ExprEncodingRef::new_ref(LikeExprEncoding.as_ref())
+    fn serialize(&self, instance: &Self::Instance) -> VortexResult<Option<Vec<u8>>> {
+        Ok(Some(
+            pb::LikeOpts {
+                negated: instance.negated,
+                case_insensitive: instance.case_insensitive,
+            }
+            .encode_to_vec(),
+        ))
     }
 
-    fn metadata(expr: &Self::Expr) -> Option<Self::Metadata> {
-        Some(ProstMetadata(pb::LikeOpts {
-            negated: expr.negated,
-            case_insensitive: expr.case_insensitive,
+    fn deserialize(&self, metadata: &[u8]) -> VortexResult<Option<Self::Instance>> {
+        let opts = pb::LikeOpts::decode(metadata)?;
+        Ok(Some(LikeOptions {
+            negated: opts.negated,
+            case_insensitive: opts.case_insensitive,
         }))
     }
 
-    fn children(expr: &Self::Expr) -> Vec<&ExprRef> {
-        vec![&expr.child, &expr.pattern]
-    }
-
-    fn with_children(expr: &Self::Expr, children: Vec<ExprRef>) -> VortexResult<Self::Expr> {
-        Ok(LikeExpr::new(
-            children[0].clone(),
-            children[1].clone(),
-            expr.negated,
-            expr.case_insensitive,
-        ))
-    }
-
-    fn build(
-        _encoding: &Self::Encoding,
-        metadata: &<Self::Metadata as DeserializeMetadata>::Output,
-        children: Vec<ExprRef>,
-    ) -> VortexResult<Self::Expr> {
-        if children.len() != 2 {
+    fn validate(&self, expr: &ExpressionView<Self>) -> VortexResult<()> {
+        if expr.children().len() != 2 {
             vortex_bail!(
-                "Like expression must have exactly 2 children, got {}",
-                children.len()
+                "Like expression requires exactly 2 children, got {}",
+                expr.children().len()
+            );
+        }
+        Ok(())
+    }
+
+    fn child_name(&self, _instance: &Self::Instance, child_idx: usize) -> ChildName {
+        match child_idx {
+            0 => ChildName::from("child"),
+            1 => ChildName::from("pattern"),
+            _ => unreachable!("Invalid child index {} for Like expression", child_idx),
+        }
+    }
+
+    fn fmt_sql(&self, expr: &ExpressionView<Self>, f: &mut Formatter<'_>) -> std::fmt::Result {
+        expr.child(0).fmt_sql(f)?;
+        if expr.data().negated {
+            write!(f, " not")?;
+        }
+        if expr.data().case_insensitive {
+            write!(f, " ilike ")?;
+        } else {
+            write!(f, " like ")?;
+        }
+        expr.child(1).fmt_sql(f)
+    }
+
+    fn return_dtype(&self, expr: &ExpressionView<Self>, scope: &DType) -> VortexResult<DType> {
+        let input = expr.children()[0].return_dtype(scope)?;
+        let pattern = expr.children()[1].return_dtype(scope)?;
+
+        if !input.is_utf8() {
+            vortex_bail!("LIKE expression requires UTF8 input dtype, got {}", input);
+        }
+        if !pattern.is_utf8() {
+            vortex_bail!(
+                "LIKE expression requires UTF8 pattern dtype, got {}",
+                pattern
             );
         }
 
-        Ok(LikeExpr::new(
-            children[0].clone(),
-            children[1].clone(),
-            metadata.negated,
-            metadata.case_insensitive,
-        ))
-    }
-
-    fn evaluate(expr: &Self::Expr, scope: &Scope) -> VortexResult<ArrayRef> {
-        let child = expr.child().unchecked_evaluate(scope)?;
-        let pattern = expr.pattern().unchecked_evaluate(scope)?;
-        like(
-            &child,
-            &pattern,
-            LikeOptions {
-                negated: expr.negated,
-                case_insensitive: expr.case_insensitive,
-            },
-        )
-    }
-
-    fn return_dtype(expr: &Self::Expr, scope: &DType) -> VortexResult<DType> {
-        let input = expr.child().return_dtype(scope)?;
-        let pattern = expr.pattern().return_dtype(scope)?;
         Ok(DType::Bool(
             (input.is_nullable() || pattern.is_nullable()).into(),
         ))
     }
-}
 
-impl LikeExpr {
-    pub fn new(child: ExprRef, pattern: ExprRef, negated: bool, case_insensitive: bool) -> Self {
-        Self {
-            child,
-            pattern,
-            negated,
-            case_insensitive,
-        }
-    }
-
-    pub fn new_expr(
-        child: ExprRef,
-        pattern: ExprRef,
-        negated: bool,
-        case_insensitive: bool,
-    ) -> ExprRef {
-        Self::new(child, pattern, negated, case_insensitive).into_expr()
-    }
-
-    pub fn child(&self) -> &ExprRef {
-        &self.child
-    }
-
-    pub fn pattern(&self) -> &ExprRef {
-        &self.pattern
-    }
-
-    pub fn negated(&self) -> bool {
-        self.negated
-    }
-
-    pub fn case_insensitive(&self) -> bool {
-        self.case_insensitive
+    fn evaluate(&self, expr: &ExpressionView<Self>, scope: &ArrayRef) -> VortexResult<ArrayRef> {
+        let child = expr.child(0).evaluate(scope)?;
+        let pattern = expr.child(1).evaluate(scope)?;
+        like_compute(&child, &pattern, *expr.data())
     }
 }
 
-impl DisplayAs for LikeExpr {
-    fn fmt_as(&self, df: DisplayFormat, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match df {
-            DisplayFormat::Compact => {
-                write!(f, "{} LIKE {}", self.child(), self.pattern())
-            }
-            DisplayFormat::Tree => {
-                write!(f, "Like")
-            }
-        }
-    }
-
-    fn child_names(&self) -> Option<Vec<String>> {
-        Some(vec!["child".to_string(), "pattern".to_string()])
-    }
+pub fn like(child: Expression, pattern: Expression) -> Expression {
+    Like.new_expr(
+        LikeOptions {
+            negated: false,
+            case_insensitive: false,
+        },
+        [child, pattern],
+    )
 }
 
-impl AnalysisExpr for LikeExpr {}
+pub fn ilike(child: Expression, pattern: Expression) -> Expression {
+    Like.new_expr(
+        LikeOptions {
+            negated: false,
+            case_insensitive: true,
+        },
+        [child, pattern],
+    )
+}
+
+pub fn not_like(child: Expression, pattern: Expression) -> Expression {
+    Like.new_expr(
+        LikeOptions {
+            negated: true,
+            case_insensitive: false,
+        },
+        [child, pattern],
+    )
+}
+
+pub fn not_ilike(child: Expression, pattern: Expression) -> Expression {
+    Like.new_expr(
+        LikeOptions {
+            negated: true,
+            case_insensitive: true,
+        },
+        [child, pattern],
+    )
+}
 
 #[cfg(test)]
 mod tests {
@@ -170,7 +143,12 @@ mod tests {
     use vortex_array::arrays::BoolArray;
     use vortex_dtype::{DType, Nullability};
 
-    use crate::{LikeExpr, Scope, get_item, lit, not, root};
+    use crate::Scope;
+    use crate::exprs::get_item::get_item;
+    use crate::exprs::like::{like, not_ilike};
+    use crate::exprs::literal::lit;
+    use crate::exprs::not::not;
+    use crate::exprs::root::root;
 
     #[test]
     fn invert_booleans() {
@@ -191,7 +169,7 @@ mod tests {
     #[test]
     fn dtype() {
         let dtype = DType::Utf8(Nullability::NonNullable);
-        let like_expr = LikeExpr::new(root(), lit("%test%"), false, false);
+        let like_expr = like(root(), lit("%test%"));
         assert_eq!(
             like_expr.return_dtype(&dtype).unwrap(),
             DType::Bool(Nullability::NonNullable)
@@ -200,10 +178,10 @@ mod tests {
 
     #[test]
     fn test_display() {
-        let expr = LikeExpr::new(get_item("name", root()), lit("%john%"), false, false);
-        assert_eq!(expr.to_string(), "$.name LIKE \"%john%\"");
+        let expr = like(get_item("name", root()), lit("%john%"));
+        assert_eq!(expr.to_string(), "$.name like \"%john%\"");
 
-        let expr2 = LikeExpr::new(root(), lit("test*"), true, true);
-        assert_eq!(expr2.to_string(), "$ LIKE \"test*\"");
+        let expr2 = not_ilike(root(), lit("test*"));
+        assert_eq!(expr2.to_string(), "$ not ilike \"test*\"");
     }
 }

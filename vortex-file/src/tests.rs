@@ -22,7 +22,9 @@ use vortex_dict::{DictEncoding, DictVTable};
 use vortex_dtype::PType::I32;
 use vortex_dtype::{DType, DecimalDType, Nullability, PType, StructFields};
 use vortex_error::VortexResult;
-use vortex_expr::{PackExpr, and, eq, get_item, gt, gt_eq, lit, lt, lt_eq, or, root, select};
+use vortex_expr::{
+    Pack, PackOptions, VTableExt, and, eq, get_item, gt, gt_eq, lit, lt, lt_eq, or, root, select,
+};
 use vortex_io::session::RuntimeSession;
 use vortex_layout::session::LayoutSession;
 use vortex_metrics::VortexMetrics;
@@ -1195,11 +1197,13 @@ async fn scan_empty_fields() -> VortexResult<()> {
     let array = (0..10000).collect::<PrimitiveArray>();
 
     let result = round_trip(array.as_ref(), |scan| {
-        Ok(scan.with_projection(PackExpr::try_new_expr(
-            Default::default(),
-            vec![],
-            Nullability::Nullable,
-        )?))
+        Ok(scan.with_projection(Pack.new_expr(
+            PackOptions {
+                names: Default::default(),
+                nullability: Nullability::Nullable,
+            },
+            [],
+        )))
     })
     .await?;
 

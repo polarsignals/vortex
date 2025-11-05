@@ -3,27 +3,29 @@
 
 use vortex_error::VortexResult;
 
-use crate::transform::match_between::find_between;
 // use crate::transform::match_between::find_between;
+use crate::Expression;
+use crate::exprs::get_item::GetItem;
+use crate::exprs::pack::Pack;
+use crate::transform::match_between::find_between;
 use crate::traversal::{NodeExt, Transformed};
-use crate::{ExprRef, GetItemVTable, PackVTable};
 
 /// Simplifies an expression into an equivalent expression which is faster and easier to analyze.
 ///
 /// If the scope dtype is known, see `simplify_typed` for a simplifier which uses dtype.
-pub fn simplify(e: ExprRef) -> VortexResult<ExprRef> {
+pub fn simplify(e: Expression) -> VortexResult<Expression> {
     let e = e
         .transform_up(simplify_transformer)
         .map(|e| e.into_inner())?;
-    Ok(find_between(e.clone()))
+    Ok(find_between(e))
 }
 
-fn simplify_transformer(node: ExprRef) -> VortexResult<Transformed<ExprRef>> {
+fn simplify_transformer(node: Expression) -> VortexResult<Transformed<Expression>> {
     // pack(l_1: e_1, ..., l_i: e_i, ..., l_n: e_n).get_item(l_i) = e_i where 0 <= i <= n
-    if let Some(get_item) = node.as_opt::<GetItemVTable>()
-        && let Some(pack) = get_item.child().as_opt::<PackVTable>()
+    if let Some(get_item) = node.as_opt::<GetItem>()
+        && let Some(pack) = get_item.child(0).as_opt::<Pack>()
     {
-        let expr = pack.field(get_item.field())?;
+        let expr = pack.field(get_item.data())?;
         return Ok(Transformed::yes(expr));
     }
     Ok(Transformed::no(node))
@@ -33,8 +35,10 @@ fn simplify_transformer(node: ExprRef) -> VortexResult<Transformed<ExprRef>> {
 mod tests {
     use vortex_dtype::Nullability::NonNullable;
 
-    use crate::transform::simplify::simplify;
-    use crate::{get_item, lit, pack};
+    use super::simplify;
+    use crate::exprs::get_item::get_item;
+    use crate::exprs::literal::lit;
+    use crate::exprs::pack::pack;
 
     #[test]
     fn test_simplify() {

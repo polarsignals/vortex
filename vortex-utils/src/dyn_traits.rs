@@ -1,19 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+//! Dynamic traits for equality and hashing.
+
 use std::any::Any;
 
-// TODO(adam): Look into having a similar setup as dyn-hash that will allow deriving `PartialEq` for structs
-// that have `Arc<dyn Trait>` fields.
-/// Allows comparing dyn-compatible objects, like [`ExprRef`](crate::ExprRef).
-pub trait DynEq {
+/// A dynamic equality trait for types implementing [`PartialEq`] or [`Eq`].
+pub trait DynEq: Any + private::SealedEq {
+    /// Compares `self` with another `Any` type for equality.
     fn dyn_eq(&self, other: &dyn Any) -> bool;
 }
 
-impl<T: Eq + Any> DynEq for T {
+impl<T: PartialEq + 'static> DynEq for T {
     fn dyn_eq(&self, other: &dyn Any) -> bool {
-        Some(self) == other.downcast_ref::<Self>()
+        other
+            .downcast_ref::<Self>()
+            .is_some_and(|other| other.eq(self))
     }
+}
+
+/// A dynamic hash trait for types implementing [`std::hash::Hash`].
+pub trait DynHash: private::SealedHash {
+    /// Hashes `self` into the given hasher.
+    fn dyn_hash(&self, state: &mut dyn std::hash::Hasher);
+}
+
+impl<T: std::hash::Hash + 'static> DynHash for T {
+    fn dyn_hash(&self, mut state: &mut dyn std::hash::Hasher) {
+        std::hash::Hash::hash(self, &mut state);
+    }
+}
+
+mod private {
+    pub trait SealedEq {}
+    impl<T: PartialEq + ?Sized> SealedEq for T {}
+
+    pub trait SealedHash {}
+    impl<T: std::hash::Hash + ?Sized> SealedHash for T {}
 }
 
 #[cfg(test)]

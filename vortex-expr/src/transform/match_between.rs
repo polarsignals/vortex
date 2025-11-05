@@ -3,15 +3,17 @@
 
 use vortex_array::compute::{BetweenOptions, StrictComparison};
 
+use crate::exprs::between::Between;
+use crate::exprs::binary::{Binary, and};
+use crate::exprs::get_item::GetItem;
+use crate::exprs::literal::{Literal, lit};
+use crate::exprs::operators::Operator;
 use crate::forms::conjuncts;
-use crate::{
-    BetweenExpr, BinaryExpr, BinaryVTable, ExprRef, GetItemVTable, IntoExpr, LiteralVTable,
-    Operator, and, lit,
-};
+use crate::{Expression, VTableExt};
 
 /// This pass looks for expression of the form
 ///      `x >= a && x < b` and converts them into x between a and b`
-pub fn find_between(expr: ExprRef) -> ExprRef {
+pub fn find_between(expr: Expression) -> Expression {
     // We search all pairs of cnfs to find any pair of expressions can be converted into a between
     // expression.
     let mut conjuncts = conjuncts(&expr);
@@ -43,66 +45,67 @@ pub fn find_between(expr: ExprRef) -> ExprRef {
     rest.into_iter().reduce(and).unwrap_or_else(|| lit(true))
 }
 
-fn maybe_match(lhs: &ExprRef, rhs: &ExprRef) -> Option<ExprRef> {
-    let (Some(lhs), Some(rhs)) = (lhs.as_opt::<BinaryVTable>(), rhs.as_opt::<BinaryVTable>())
-    else {
+fn maybe_match(lhs: &Expression, rhs: &Expression) -> Option<Expression> {
+    let (Some(lhs_e), Some(rhs_e)) = (lhs.as_opt::<Binary>(), rhs.as_opt::<Binary>()) else {
         return None;
     };
 
     // Cannot compare to self
-    if lhs.lhs().eq(lhs.rhs()) || rhs.lhs().eq(rhs.rhs()) {
+    if lhs_e.lhs().eq(lhs_e.rhs()) || rhs_e.lhs().eq(rhs_e.rhs()) {
         return None;
     }
 
     // First, get both halves to have GetItem on the left
-    let lhs = match (
-        lhs.lhs().is::<GetItemVTable>(),
-        lhs.rhs().is::<GetItemVTable>(),
-    ) {
+    let lhs = match (lhs_e.lhs().is::<GetItem>(), lhs_e.rhs().is::<GetItem>()) {
         (true, false) => lhs.clone(),
-        (false, true) => BinaryExpr::new(lhs.rhs().clone(), lhs.op().swap()?, lhs.lhs().clone()),
+        (false, true) => Binary.new_expr(
+            lhs_e.operator().swap()?,
+            [lhs_e.rhs().clone(), lhs_e.lhs().clone()],
+        ),
         _ => return None,
     };
+    let lhs_e = lhs.as_::<Binary>();
 
-    let rhs = match (
-        rhs.lhs().is::<GetItemVTable>(),
-        rhs.rhs().is::<GetItemVTable>(),
-    ) {
+    let rhs = match (rhs_e.lhs().is::<GetItem>(), rhs_e.rhs().is::<GetItem>()) {
         (true, false) => rhs.clone(),
-        (false, true) => BinaryExpr::new(rhs.rhs().clone(), rhs.op().swap()?, rhs.lhs().clone()),
+        (false, true) => Binary.new_expr(
+            rhs_e.operator().swap()?,
+            [rhs_e.rhs().clone(), rhs_e.lhs().clone()],
+        ),
         _ => return None,
     };
+    let rhs_e = rhs.as_::<Binary>();
 
     // Both conjuncts must reference the same GetItem column
-    if !lhs.lhs().eq(rhs.lhs()) {
+    if !lhs_e.lhs().eq(rhs_e.lhs()) {
         return None;
     }
 
-    let target = lhs.lhs().clone();
+    let target = lhs_e.lhs().clone();
 
     // Find the lower bound
-    let (lower, upper) = match (lhs.op(), rhs.op()) {
+    let (lower, upper) = match (lhs_e.operator(), rhs_e.operator()) {
         (Operator::Lt | Operator::Lte, Operator::Gt | Operator::Gte) => (rhs, lhs),
         (Operator::Gt | Operator::Gte, Operator::Lt | Operator::Lte) => (lhs, rhs),
         _ => return None,
     };
+    let lower_e = lower.as_::<Binary>();
+    let upper_e = upper.as_::<Binary>();
 
-    let lower_lit = lower.rhs().as_opt::<LiteralVTable>()?.to_expr();
-    let upper_lit = upper.rhs().as_opt::<LiteralVTable>()?.to_expr();
+    // Ensure bounds are literals
+    let _ = lower_e.rhs().as_opt::<Literal>()?;
+    let _ = upper_e.rhs().as_opt::<Literal>()?;
 
-    let lower_strict = is_strict_comparison(lower.op())?;
-    let upper_strict = is_strict_comparison(upper.op())?;
+    let lower_strict = is_strict_comparison(lower_e.operator())?;
+    let upper_strict = is_strict_comparison(upper_e.operator())?;
 
-    let expr = BetweenExpr::new(
-        target.clone(),
-        lower_lit,
-        upper_lit,
+    Some(Between.new_expr(
         BetweenOptions {
             lower_strict,
             upper_strict,
         },
-    );
-    Some(expr.into_expr())
+        [target, lower_e.rhs().clone(), upper_e.rhs().clone()],
+    ))
 }
 
 fn is_strict_comparison(op: Operator) -> Option<StrictComparison> {
@@ -117,8 +120,11 @@ fn is_strict_comparison(op: Operator) -> Option<StrictComparison> {
 mod tests {
     use vortex_array::compute::{BetweenOptions, StrictComparison};
 
-    use crate::transform::match_between::find_between;
-    use crate::{and, between, col, gt, gt_eq, lit, lt, lt_eq};
+    use super::find_between;
+    use crate::exprs::between::between;
+    use crate::exprs::binary::{and, gt, gt_eq, lt, lt_eq};
+    use crate::exprs::get_item::col;
+    use crate::exprs::literal::lit;
 
     #[test]
     fn test_bad_match() {

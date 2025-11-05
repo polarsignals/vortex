@@ -5,17 +5,20 @@ use itertools::Itertools as _;
 use vortex_error::{VortexExpect, VortexResult, vortex_bail, vortex_err};
 use vortex_utils::aliases::hash_set::HashSet;
 
+use crate::exprs::get_item::get_item;
+use crate::exprs::merge::{DuplicateHandling, Merge};
+use crate::exprs::pack::pack;
 use crate::traversal::{NodeExt, Transformed};
-use crate::{DType, DuplicateHandling, ExprRef, MergeVTable, get_item, pack};
+use crate::{DType, Expression};
 
 /// Replaces [crate::MergeExpr] with combination of [crate::GetItem] and [crate::Pack] expressions.
-pub(crate) fn remove_merge(e: ExprRef, ctx: &DType) -> VortexResult<ExprRef> {
+pub(crate) fn remove_merge(e: Expression, ctx: &DType) -> VortexResult<Expression> {
     e.transform_up(|node| merge_transform(node, ctx))
         .map(|t| t.into_inner())
 }
 
-fn merge_transform(node: ExprRef, ctx: &DType) -> VortexResult<Transformed<ExprRef>> {
-    match node.as_opt::<MergeVTable>() {
+fn merge_transform(node: Expression, ctx: &DType) -> VortexResult<Transformed<Expression>> {
+    match node.as_opt::<Merge>() {
         None => Ok(Transformed::no(node)),
         Some(merge) => {
             let merge_dtype = merge.return_dtype(ctx)?;
@@ -23,7 +26,7 @@ fn merge_transform(node: ExprRef, ctx: &DType) -> VortexResult<Transformed<ExprR
             let mut children = Vec::with_capacity(merge.children().len() * 2);
             let mut all_nullable = true;
             let mut duplicate_names = HashSet::<_>::new();
-            for child in merge.children() {
+            for child in merge.children().iter() {
                 let child_dtype = child.return_dtype(ctx)?;
                 if !child_dtype.is_struct() {
                     return Err(vortex_err!(
@@ -47,9 +50,7 @@ fn merge_transform(node: ExprRef, ctx: &DType) -> VortexResult<Transformed<ExprR
                     }
                 }
 
-                if merge.duplicate_handling() == DuplicateHandling::Error
-                    && !duplicate_names.is_empty()
-                {
+                if merge.data() == &DuplicateHandling::Error && !duplicate_names.is_empty() {
                     vortex_bail!(
                         "merge: duplicate fields in children: {}",
                         duplicate_names.into_iter().format(", ")
@@ -74,8 +75,12 @@ mod tests {
     use vortex_dtype::Nullability::NonNullable;
     use vortex_dtype::PType::{I32, I64, U32, U64};
 
-    use crate::transform::remove_merge::remove_merge;
-    use crate::{DuplicateHandling, PackVTable, get_item, merge_opts, root};
+    use super::remove_merge;
+    use crate::exprs::get_item::get_item;
+    use crate::exprs::merge::merge_opts;
+    use crate::exprs::pack::Pack;
+    use crate::exprs::root::root;
+    use crate::transform::remove_merge::DuplicateHandling;
 
     #[test]
     fn test_remove_merge() {
@@ -93,7 +98,7 @@ mod tests {
         );
         let e = remove_merge(e, &dtype).unwrap();
 
-        assert!(e.is::<PackVTable>());
+        assert!(e.is::<Pack>());
         assert_eq!(
             e.return_dtype(&dtype).unwrap(),
             DType::struct_([("a", I32), ("b", U32), ("c", U64)], NonNullable)

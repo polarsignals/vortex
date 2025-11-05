@@ -262,6 +262,10 @@ impl StrictComparison {
             StrictComparison::NonStrict => Operator::Lte,
         }
     }
+
+    pub const fn is_strict(&self) -> bool {
+        matches!(self, StrictComparison::Strict)
+    }
 }
 
 #[cfg(test)]
