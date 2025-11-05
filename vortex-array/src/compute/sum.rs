@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 
 use arcref::ArcRef;
 use vortex_dtype::DType;
+use vortex_dtype::Nullability::NonNullable;
 use vortex_error::{VortexResult, vortex_err, vortex_panic};
 use vortex_scalar::Scalar;
 
@@ -124,13 +125,8 @@ pub fn sum_impl(
     sum_dtype: DType,
     kernels: &[ArcRef<dyn Kernel>],
 ) -> VortexResult<Scalar> {
-    if array.is_empty() {
-        return Ok(Scalar::default_value(sum_dtype));
-    }
-
-    // Sum of all null is null.
-    if array.all_invalid() {
-        return Ok(Scalar::null(sum_dtype));
+    if array.is_empty() || array.all_invalid() {
+        return Scalar::default_value(sum_dtype.with_nullability(NonNullable)).cast(&sum_dtype);
     }
 
     // Try to find a sum kernel
@@ -162,7 +158,7 @@ pub fn sum_impl(
 #[cfg(test)]
 mod test {
     use vortex_buffer::buffer;
-    use vortex_dtype::{DType, Nullability, PType};
+    use vortex_dtype::Nullability;
     use vortex_scalar::Scalar;
 
     use crate::IntoArray as _;
@@ -173,20 +169,14 @@ mod test {
     fn sum_all_invalid() {
         let array = PrimitiveArray::from_option_iter::<i32, _>([None, None, None]);
         let result = sum(array.as_ref()).unwrap();
-        assert_eq!(
-            result,
-            Scalar::null(DType::Primitive(PType::I64, Nullability::Nullable))
-        );
+        assert_eq!(result, Scalar::primitive(0i64, Nullability::Nullable));
     }
 
     #[test]
     fn sum_all_invalid_float() {
         let array = PrimitiveArray::from_option_iter::<f32, _>([None, None, None]);
         let result = sum(array.as_ref()).unwrap();
-        assert_eq!(
-            result,
-            Scalar::null(DType::Primitive(PType::F64, Nullability::Nullable))
-        );
+        assert_eq!(result, Scalar::primitive(0f64, Nullability::Nullable));
     }
 
     #[test]
