@@ -178,7 +178,8 @@ fn min_max_impl(
     vortex_bail!(NotImplemented: "min_max", array.encoding_id());
 }
 
-/// The minimum and maximum non-null values of an array, or None if there are no non-null values.
+/// The minimum and maximum non-null values of an array, or None if there are no non-null/or non-nan
+/// values.
 pub trait MinMaxKernel: VTable {
     fn min_max(&self, array: &Self::Array) -> VortexResult<Option<MinMaxResult>>;
 }
