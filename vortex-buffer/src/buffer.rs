@@ -399,12 +399,6 @@ impl<T> Buffer<T> {
         }
     }
 
-    /// Convert self into `BufferMut<T>`, copying if there are multiple strong references.
-    pub fn into_mut(self) -> BufferMut<T> {
-        self.try_into_mut()
-            .unwrap_or_else(|buffer| BufferMut::<T>::copy_from(&buffer))
-    }
-
     /// Try to convert self into `BufferMut<T>` if there is only a single strong reference.
     pub fn try_into_mut(self) -> Result<BufferMut<T>, Self> {
         self.bytes
@@ -421,6 +415,12 @@ impl<T> Buffer<T> {
                 alignment: self.alignment,
                 _marker: Default::default(),
             })
+    }
+
+    /// Convert self into `BufferMut<T>`, cloning the data if there are multiple strong references.
+    pub fn into_mut(self) -> BufferMut<T> {
+        self.try_into_mut()
+            .unwrap_or_else(|buffer| BufferMut::<T>::copy_from(&buffer))
     }
 
     /// Returns whether a `Buffer<T>` is aligned to the given alignment.
