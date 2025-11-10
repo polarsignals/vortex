@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-use std::fmt::Debug;
-use std::ops::Deref;
-
 use vortex_array::accessor::ArrayAccessor;
-use vortex_array::arrays::BoolArray;
+use vortex_array::arrays::{BoolArray, NativeValue};
 use vortex_array::compute::{Operator, scalar_cmp};
 use vortex_array::validity::Validity;
 use vortex_array::{Array, ArrayRef, IntoArray, ToCanonical};
 use vortex_buffer::BitBuffer;
-use vortex_dtype::{
-    DType, NativeDecimalType, NativePType, match_each_decimal_value_type, match_each_native_ptype,
-};
+use vortex_dtype::{DType, Nullability, match_each_decimal_value_type, match_each_native_ptype};
 use vortex_error::{VortexExpect, VortexResult, vortex_err};
 use vortex_scalar::Scalar;
 
@@ -29,6 +24,8 @@ pub fn compare_canonical_array(
         .into_array());
     }
 
+    let result_nullability = array.dtype().nullability() | value.dtype().nullability();
+
     match array.dtype() {
         DType::Bool(_) => {
             let bool = value
@@ -44,6 +41,7 @@ pub fn compare_canonical_array(
                     .map(|(b, v)| v.then_some(b)),
                 bool,
                 operator,
+                result_nullability,
             ))
         }
         DType::Primitive(p, _) => {
@@ -53,15 +51,16 @@ pub fn compare_canonical_array(
                 let pval = primitive
                     .typed_value::<P>()
                     .vortex_expect("nulls handled before");
-                Ok(compare_native_ptype(
+                Ok(compare_to(
                     primitive_array
                         .as_slice::<P>()
                         .iter()
                         .copied()
                         .zip(array.validity_mask().to_bit_buffer().iter())
-                        .map(|(b, v)| v.then_some(b)),
-                    pval,
+                        .map(|(b, v)| v.then_some(NativeValue(b))),
+                    NativeValue(pval),
                     operator,
+                    result_nullability,
                 ))
             })
         }
@@ -75,7 +74,7 @@ pub fn compare_canonical_array(
                     .cast::<D>()
                     .ok_or_else(|| vortex_err!("todo: handle upcast of decimal array"))?;
                 let buf = decimal_array.buffer::<D>();
-                Ok(compare_native_decimal_type(
+                Ok(compare_to(
                     buf.as_slice()
                         .iter()
                         .copied()
@@ -83,6 +82,7 @@ pub fn compare_canonical_array(
                         .map(|(b, v)| v.then_some(b)),
                     dval,
                     operator,
+                    result_nullability,
                 ))
             })
         }
@@ -93,8 +93,9 @@ pub fn compare_canonical_array(
                 .vortex_expect("nulls handled before");
             compare_to(
                 iter.map(|v| v.map(|b| unsafe { str::from_utf8_unchecked(b) })),
-                utf8_value.deref(),
+                &utf8_value,
                 operator,
+                result_nullability,
             )
         }),
         DType::Binary(_) => array.to_varbinview().with_iterator(|iter| {
@@ -106,8 +107,9 @@ pub fn compare_canonical_array(
                 // Don't understand the lifetime problem here but identity map makes it go away
                 #[allow(clippy::map_identity)]
                 iter.map(|v| v),
-                binary_value.deref(),
+                &binary_value,
                 operator,
+                result_nullability,
             )
         }),
         DType::Struct(..) | DType::List(..) | DType::FixedSizeList(..) => {
@@ -125,56 +127,29 @@ pub fn compare_canonical_array(
     }
 }
 
-fn compare_to<T: PartialOrd + PartialEq + Debug>(
+fn compare_to<T: PartialOrd>(
     values: impl Iterator<Item = Option<T>>,
     cmp_value: T,
     operator: Operator,
+    nullability: Nullability,
 ) -> ArrayRef {
-    BoolArray::from_iter(values.map(|val| {
-        val.map(|v| match operator {
-            Operator::Eq => v == cmp_value,
-            Operator::NotEq => v != cmp_value,
-            Operator::Gt => v > cmp_value,
-            Operator::Gte => v >= cmp_value,
-            Operator::Lt => v < cmp_value,
-            Operator::Lte => v <= cmp_value,
-        })
-    }))
-    .into_array()
-}
+    let eval_fn = |v| match operator {
+        Operator::Eq => v == cmp_value,
+        Operator::NotEq => v != cmp_value,
+        Operator::Gt => v > cmp_value,
+        Operator::Gte => v >= cmp_value,
+        Operator::Lt => v < cmp_value,
+        Operator::Lte => v <= cmp_value,
+    };
 
-fn compare_native_ptype<T: NativePType>(
-    values: impl Iterator<Item = Option<T>>,
-    cmp_value: T,
-    operator: Operator,
-) -> ArrayRef {
-    BoolArray::from_iter(values.map(|val| {
-        val.map(|v| match operator {
-            Operator::Eq => v.is_eq(cmp_value),
-            Operator::NotEq => !v.is_eq(cmp_value),
-            Operator::Gt => v.is_gt(cmp_value),
-            Operator::Gte => v.is_ge(cmp_value),
-            Operator::Lt => v.is_lt(cmp_value),
-            Operator::Lte => v.is_le(cmp_value),
-        })
-    }))
-    .into_array()
-}
-
-fn compare_native_decimal_type<D: NativeDecimalType>(
-    values: impl Iterator<Item = Option<D>>,
-    cmp_value: D,
-    operator: Operator,
-) -> ArrayRef {
-    BoolArray::from_iter(values.map(|val| {
-        val.map(|v| match operator {
-            Operator::Eq => v == cmp_value,
-            Operator::NotEq => v != cmp_value,
-            Operator::Gt => v > cmp_value,
-            Operator::Gte => v >= cmp_value,
-            Operator::Lt => v < cmp_value,
-            Operator::Lte => v <= cmp_value,
-        })
-    }))
-    .into_array()
+    if !nullability.is_nullable() {
+        BoolArray::from_iter(
+            values
+                .map(|val| val.vortex_expect("non nullable"))
+                .map(eval_fn),
+        )
+        .into_array()
+    } else {
+        BoolArray::from_iter(values.map(|val| val.map(eval_fn))).into_array()
+    }
 }
