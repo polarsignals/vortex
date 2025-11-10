@@ -8,7 +8,7 @@ use vortex_vector::Vector;
 use crate::ArrayRef;
 use crate::array::IntoArray;
 use crate::execution::{BatchKernelRef, BindCtx, ExecutionCtx};
-use crate::operator::OperatorRef;
+use crate::pipeline::{PipelineSource, PipelineTransform};
 use crate::vtable::{NotSupported, VTable};
 
 /// A vtable for the new operator-based array functionality. Eventually this vtable will be
@@ -17,14 +17,7 @@ use crate::vtable::{NotSupported, VTable};
 ///
 /// See <https://github.com/vortex-data/vortex/pull/4726> for the operators RFC.
 pub trait OperatorVTable<V: VTable> {
-    /// Convert the current array into a [`OperatorRef`].
-    /// Returns `None` if the array cannot be converted to an operator.
-    fn to_operator(_array: &V::Array) -> VortexResult<Option<OperatorRef>> {
-        Ok(None)
-    }
-
-    /// Takes the array by ownership, returning a canonical [`Vector`] containing the rows
-    /// indicated by the given selection [`Mask`].
+    /// Returns a canonical [`Vector`] containing the rows indicated by the given selection [`Mask`].
     ///
     /// The returned vector must be the appropriate one for the array's logical type (they are
     /// one-to-one with Vortex `DType`s), and should respect the output nullability of the array.
@@ -45,6 +38,13 @@ pub trait OperatorVTable<V: VTable> {
         _ctx: &mut dyn ExecutionCtx,
     ) -> VortexResult<Vector> {
         Self::bind(array, Some(&selection.clone().into_array()), &mut ())?.execute()
+    }
+
+    /// Downcast this array into a [`PipelineNode`] if it supports pipelined execution.
+    ///
+    /// Each node is either a source node or a transformation node.
+    fn pipeline_node(_array: &V::Array) -> Option<PipelineNode<'_>> {
+        None
     }
 
     /// Bind the array for execution in batch mode.
@@ -104,11 +104,15 @@ pub trait OperatorVTable<V: VTable> {
     }
 }
 
-impl<V: VTable> OperatorVTable<V> for NotSupported {
-    fn to_operator(_array: &V::Array) -> VortexResult<Option<OperatorRef>> {
-        Ok(None)
-    }
+/// An enum over the types of pipeline nodes.
+pub enum PipelineNode<'a> {
+    /// This node is a source node in a pipeline.
+    Source(&'a dyn PipelineSource),
+    /// This node is a transformation node in a pipeline.
+    Transform(&'a dyn PipelineTransform),
+}
 
+impl<V: VTable> OperatorVTable<V> for NotSupported {
     fn bind(
         array: &V::Array,
         _selection: Option<&ArrayRef>,

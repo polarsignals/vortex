@@ -8,7 +8,8 @@ use vortex_mask::Mask;
 use vortex_vector::{Vector, VectorOps, vector_matches_dtype};
 
 use crate::execution::{BatchKernelRef, BindCtx, DummyExecutionCtx, ExecutionCtx};
-use crate::vtable::{OperatorVTable, VTable};
+use crate::pipeline::source_driver::PipelineSourceDriver;
+use crate::vtable::{OperatorVTable, PipelineNode, VTable};
 use crate::{Array, ArrayAdapter, ArrayRef};
 
 /// Array functions as provided by the `OperatorVTable`.
@@ -21,7 +22,7 @@ pub trait ArrayOperator: 'static + Send + Sync {
     /// # Panics
     ///
     /// If the mask length does not match the array length.
-    /// If the array's implementation returns an invalid vector (wrong length, wrong type, etc).
+    /// If the array's implementation returns an invalid vector (wrong length, wrong type, etc.).
     fn execute_batch(&self, selection: &Mask, ctx: &mut dyn ExecutionCtx) -> VortexResult<Vector>;
 
     /// Optimize the array by running the optimization rules.
@@ -62,6 +63,14 @@ impl ArrayOperator for Arc<dyn Array> {
 
 impl<V: VTable> ArrayOperator for ArrayAdapter<V> {
     fn execute_batch(&self, selection: &Mask, ctx: &mut dyn ExecutionCtx) -> VortexResult<Vector> {
+        // Check if the array is a pipeline node
+        if let Some(pipeline_node) =
+            <V::OperatorVTable as OperatorVTable<V>>::pipeline_node(&self.0)
+            && let PipelineNode::Source(source) = pipeline_node
+        {
+            return PipelineSourceDriver::new(source).execute(selection);
+        }
+
         let vector =
             <V::OperatorVTable as OperatorVTable<V>>::execute_batch(&self.0, selection, ctx)?;
 
