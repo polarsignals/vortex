@@ -189,6 +189,19 @@ impl VectorMutOps for FixedSizeListVectorMut {
         self.elements.reserve(additional * self.list_size as usize);
     }
 
+    fn clear(&mut self) {
+        self.elements.clear();
+        self.validity.clear();
+        self.len = 0;
+    }
+
+    fn truncate(&mut self, len: usize) {
+        let new_len = len.min(self.len);
+        self.elements.truncate(new_len * self.list_size as usize);
+        self.validity.truncate(new_len);
+        self.len = new_len;
+    }
+
     fn extend_from_vector(&mut self, other: &FixedSizeListVector) {
         match_vector_pair!(
             self.elements.as_mut(),

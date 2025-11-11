@@ -140,6 +140,16 @@ impl<T: NativePType> VectorMutOps for PVectorMut<T> {
         self.validity.reserve(additional);
     }
 
+    fn clear(&mut self) {
+        self.elements.clear();
+        self.validity.clear();
+    }
+
+    fn truncate(&mut self, len: usize) {
+        self.elements.truncate(len);
+        self.validity.truncate(len);
+    }
+
     /// Extends the vector by appending elements from another vector.
     fn extend_from_vector(&mut self, other: &PVector<T>) {
         self.elements.extend_from_slice(other.elements.as_slice());

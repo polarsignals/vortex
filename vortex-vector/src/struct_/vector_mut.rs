@@ -170,6 +170,24 @@ impl VectorMutOps for StructVectorMut {
         self.validity.reserve(additional);
     }
 
+    fn clear(&mut self) {
+        for field in &mut self.fields {
+            field.clear();
+        }
+
+        self.validity.clear();
+        self.len = 0;
+    }
+
+    fn truncate(&mut self, len: usize) {
+        for field in &mut self.fields {
+            field.truncate(len);
+        }
+
+        self.validity.truncate(len);
+        self.len = self.validity.len();
+    }
+
     fn extend_from_vector(&mut self, other: &StructVector) {
         assert_eq!(
             self.fields.len(),
