@@ -2,14 +2,14 @@
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
 use num_traits::FromPrimitive;
+use vortex_buffer::BufferMut;
 use vortex_dtype::{IntegerPType, Nullability, match_each_integer_ptype};
 use vortex_error::VortexExpect;
 use vortex_scalar::Scalar;
 
-use crate::arrays::ListViewArray;
-use crate::builders::{ArrayBuilder, ListViewBuilder};
+use crate::arrays::{ChunkedArray, ListViewArray};
 use crate::vtable::ValidityHelper;
-use crate::{Array, compute};
+use crate::{Array, IntoArray, ToCanonical, compute};
 
 /// Modes for rebuilding a [`ListViewArray`].
 pub enum ListViewRebuildMode {
@@ -74,35 +74,80 @@ impl ListViewArray {
         let offsets_ptype = self.offsets().dtype().as_ptype();
         let sizes_ptype = self.sizes().dtype().as_ptype();
 
-        match_each_integer_ptype!(offsets_ptype, |O| {
-            match_each_integer_ptype!(sizes_ptype, |S| { self.naive_rebuild::<O, S>() })
+        match_each_integer_ptype!(sizes_ptype, |S| {
+            match offsets_ptype {
+                PType::U8 => self.naive_rebuild::<u8, u32, S>(),
+                PType::U16 => self.naive_rebuild::<u16, u32, S>(),
+                PType::U32 => self.naive_rebuild::<u32, u32, S>(),
+                PType::U64 => self.naive_rebuild::<u64, u64, S>(),
+                PType::I8 => self.naive_rebuild::<i8, i32, S>(),
+                PType::I16 => self.naive_rebuild::<i16, i32, S>(),
+                PType::I32 => self.naive_rebuild::<i32, i32, S>(),
+                PType::I64 => self.naive_rebuild::<i64, i64, S>(),
+                _ => unreachable!("invalid offsets PType"),
+            }
         })
     }
 
     /// The inner function for `rebuild_zero_copy_to_list`, which naively rebuilds a `ListViewArray`
     /// via `append_scalar`.
-    fn naive_rebuild<O: IntegerPType, S: IntegerPType>(&self) -> ListViewArray {
+    fn naive_rebuild<O: IntegerPType, NewOffset: IntegerPType, S: IntegerPType>(
+        &self,
+    ) -> ListViewArray {
         let element_dtype = self
             .dtype()
             .as_list_element_opt()
             .vortex_expect("somehow had a canonical list that was not a list");
 
-        let mut builder = ListViewBuilder::<O, S>::with_capacity(
-            element_dtype.clone(),
-            self.dtype().nullability(),
-            self.elements().len(),
-            self.len(),
-        );
+        // Upfront canonicalize the list elements, we're going to be doing a lot of
+        // slicing with them.
+        let elements_canonical = self.elements().to_canonical().into_array();
+        let offsets_canonical = self.offsets().to_primitive();
+        let sizes_canonical = self.sizes().to_primitive();
 
-        for i in 0..self.len() {
-            let list = self.scalar_at(i);
+        let offsets_canonical = offsets_canonical.as_slice::<O>();
+        let sizes_canonical = sizes_canonical.as_slice::<S>();
 
-            builder
-                .append_scalar(&list)
-                .vortex_expect("was unable to extend the `ListViewBuilder`")
+        let mut offsets = BufferMut::<NewOffset>::with_capacity(self.len());
+        let mut sizes = BufferMut::<S>::with_capacity(self.len());
+
+        let mut chunks = Vec::with_capacity(self.len());
+
+        let mut n_elements = NewOffset::zero();
+
+        for index in 0..self.len() {
+            if !self.is_valid(index) {
+                offsets.push(offsets.last().copied().unwrap_or_default());
+                sizes.push(S::zero());
+                continue;
+            }
+
+            let offset = offsets_canonical[index];
+            let size = sizes_canonical[index];
+
+            let start = offset.as_();
+            let stop = start + size.as_();
+
+            chunks.push(elements_canonical.slice(start..stop));
+            offsets.push(n_elements);
+            sizes.push(size);
+
+            n_elements += num_traits::cast(size).vortex_expect("cast");
         }
 
-        builder.finish_into_listview()
+        let offsets = offsets.into_array();
+        let sizes = sizes.into_array();
+
+        // SAFETY: all chunks were sliced from the same array so have same DType.
+        let elements =
+            unsafe { ChunkedArray::new_unchecked(chunks, element_dtype.as_ref().clone()) };
+
+        ListViewArray::new(
+            elements.to_canonical().into_array(),
+            offsets,
+            sizes,
+            self.validity.clone(),
+        )
     }
 
     /// Rebuilds a [`ListViewArray`] by trimming any unused / unreferenced leading and trailing
