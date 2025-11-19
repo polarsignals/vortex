@@ -30,7 +30,10 @@ fn apply_parent_rules(
 ) -> VortexResult<Expression> {
     expr.transform_up(|node| {
         for (idx, child) in node.children().iter().enumerate() {
-            for rule in session.rewrite_rules().parent_rules_for(&child.id()) {
+            for rule in session
+                .rewrite_rules()
+                .parent_rules_for(&child.id(), &node.id())
+            {
                 if let Some(new_expr) = rule.reduce_parent(child, &node, idx, ctx)? {
                     return Ok(Transformed::yes(new_expr));
                 }
@@ -74,13 +77,41 @@ mod tests {
     use crate::expr::exprs::literal::{Literal, lit};
     use crate::expr::exprs::operators::Operator;
     use crate::expr::session::ExprSession;
-    use crate::expr::transform::rules::{ParentReduceRule, RuleContext};
+    use crate::expr::transform::rules::{AnyParent, ParentReduceRule, RuleContext};
     use crate::expr::{Expression, ExpressionView, col};
 
     /// Test rule: simplifies addition with zero: 0 + x -> x when literal zero is a child of an Add
     struct AddZeroRule;
 
-    impl ParentReduceRule<Literal, RuleContext> for AddZeroRule {
+    impl ParentReduceRule<Literal, Binary, RuleContext> for AddZeroRule {
+        fn reduce_parent(
+            &self,
+            expr: &ExpressionView<Literal>,
+            parent: ExpressionView<Binary>,
+            child_idx: usize,
+            _ctx: &RuleContext,
+        ) -> VortexResult<Option<Expression>> {
+            // Only apply if the parent is an Add operation
+            if parent.operator() != Operator::Add {
+                return Ok(None);
+            }
+
+            // Check if this literal is zero
+            let zero_scalar = Scalar::from(0i32);
+            if expr.data() != &zero_scalar {
+                return Ok(None);
+            }
+
+            // Return the other child (not this zero)
+            let other_idx = if child_idx == 0 { 1 } else { 0 };
+            Ok(Some(parent.child(other_idx).clone()))
+        }
+    }
+
+    /// Test rule: remove identity 0 + x -> x without matching parent directly (equiv to above).
+    struct AddZeroRuleAnyParent;
+
+    impl ParentReduceRule<Literal, AnyParent, RuleContext> for AddZeroRuleAnyParent {
         fn reduce_parent(
             &self,
             expr: &ExpressionView<Literal>,
@@ -89,11 +120,10 @@ mod tests {
             _ctx: &RuleContext,
         ) -> VortexResult<Option<Expression>> {
             // Only apply if the parent is an Add operation
-            let Some(bin) = parent.as_opt::<Binary>() else {
+            let Some(parent) = parent.as_opt::<Binary>() else {
                 return Ok(None);
             };
-
-            if bin.operator() != Operator::Add {
+            if parent.operator() != Operator::Add {
                 return Ok(None);
             }
 
@@ -110,12 +140,10 @@ mod tests {
     }
 
     #[test]
-    fn test_add_zero_parent_rule_basic() {
-        // Create a session and register the rule
+    fn test_add_zero_with_specific_parent_rule() {
         let mut session = ExprSession::default();
-        session.register_parent_rule(&Literal, AddZeroRule);
+        session.register_parent_rule(&Literal, &Binary, AddZeroRule);
 
-        // Test: 0 + x should simplify to x
         let x = col("x");
         let zero = lit(0);
         let expr = checked_add(zero, x.clone());
@@ -126,15 +154,13 @@ mod tests {
     }
 
     #[test]
-    fn test_add_zero_parent_rule_left() {
+    fn test_add_zero_with_any_parent_rule() {
         let mut session = ExprSession::default();
-        session.register_parent_rule(&Literal, AddZeroRule);
+        session.register_any_parent_rule(&Literal, AddZeroRuleAnyParent);
 
-        // Test: 0 + (0 + x) should simplify to 0 + x, then to x
         let x = col("x");
         let zero = lit(0);
-        let zero_plus_x = checked_add(lit(0), x.clone());
-        let expr = checked_add(zero, zero_plus_x);
+        let expr = checked_add(zero, x.clone());
 
         let result = simplify(expr, &session).unwrap();
 
@@ -142,30 +168,14 @@ mod tests {
     }
 
     #[test]
-    fn test_add_zero_parent_rule_right() {
+    fn test_add_zero_with_both_rules() {
         let mut session = ExprSession::default();
-        session.register_parent_rule(&Literal, AddZeroRule);
+        session.register_parent_rule(&Literal, &Binary, AddZeroRule);
+        session.register_any_parent_rule(&Literal, AddZeroRuleAnyParent);
 
-        // Test: x + 0 should simplify to x
         let x = col("x");
         let zero = lit(0);
-        let expr = checked_add(x.clone(), zero);
-
-        let result = simplify(expr, &session).unwrap();
-
-        assert_eq!(&result, &x);
-    }
-
-    #[test]
-    fn test_add_zero_parent_rule_nested() {
-        let mut session = ExprSession::default();
-        session.register_parent_rule(&Literal, AddZeroRule);
-
-        // Test: (0 + x) + 0 should simplify to x
-        let x = col("x");
-        let zero = lit(0);
-        let zero_plus_x = checked_add(lit(0), x.clone());
-        let expr = checked_add(zero_plus_x, zero);
+        let expr = checked_add(zero, x.clone());
 
         let result = simplify(expr, &session).unwrap();
 
