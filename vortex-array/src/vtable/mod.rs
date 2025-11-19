@@ -28,9 +28,7 @@ use vortex_dtype::DType;
 use vortex_error::VortexResult;
 
 use crate::serde::ArrayChildren;
-use crate::{
-    Array, DeserializeMetadata, Encoding, EncodingId, EncodingRef, IntoArray, SerializeMetadata,
-};
+use crate::{Array, Encoding, EncodingId, EncodingRef, IntoArray};
 
 /// The encoding [`VTable`] encapsulates logic for an Encoding type and associated Array type.
 /// The logic is split across several "VTable" traits to enable easier code organization than
@@ -50,7 +48,7 @@ use crate::{
 pub trait VTable: 'static + Sized + Send + Sync + Debug {
     type Array: 'static + Send + Sync + Clone + Debug + Deref<Target = dyn Array> + IntoArray;
     type Encoding: 'static + Send + Sync + Clone + Deref<Target = dyn Encoding>;
-    type Metadata: Debug + SerializeMetadata + DeserializeMetadata;
+    type Metadata: Debug;
 
     type ArrayVTable: ArrayVTable<Self>;
     type CanonicalVTable: CanonicalVTable<Self>;
