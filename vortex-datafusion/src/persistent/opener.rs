@@ -246,55 +246,26 @@ impl FileOpener for VortexOpener {
                 predicate_file_schema = physical_file_schema.clone();
             }
 
-            // Create the initial mapping from physical file schema to projected schema.
-            // This gives us the field reordering and tells us which logical schema fields
-            // to select.
-            let (_schema_mapping, adapted_projections) =
-                schema_adapter.map_schema(&physical_file_schema)?;
+            // Compute the logical file schema by merging physical file types with logical table types.
+            // This schema has the same field names as logical_schema, but with physical types from the file.
+            let logical_file_schema =
+                compute_logical_file_schema(&physical_file_schema, &logical_schema);
 
-            // Build the Vortex projection expression using the adapted projections.
-            // This will reorder the fields to match the target order.
+            // Use the pre-created schema adapter to map logical_file_schema to projected_schema.
+            // Since logical_file_schema has the same field names as logical_schema (which the adapter
+            // was created with), this works correctly and gives us the projection indices.
+            let (schema_mapping, adapted_projections) =
+                schema_adapter.map_schema(&logical_file_schema)?;
+
+            // Build the Vortex projection expression using field names from logical_file_schema
             let fields = adapted_projections
                 .iter()
-                .map(|idx| {
-                    let field = logical_schema.field(*idx);
+                .map(|&idx| {
+                    let field = logical_file_schema.field(idx);
                     FieldName::from(field.name().as_str())
                 })
                 .collect::<Vec<_>>();
             let projection_expr = select(fields, root());
-
-            // After Vortex applies the projection, the batch will have fields in the target
-            // order (matching adapted_projections), but with the physical file types.
-            // We need a second schema mapping for type casting only, not reordering.
-            // Build a schema that represents what Vortex will return: fields in target order
-            // with physical types.
-            let projected_physical_fields: Vec<Field> = adapted_projections
-                .iter()
-                .map(|&idx| {
-                    let logical_field = logical_schema.field(idx);
-                    let field_name = logical_field.name();
-
-                    // Find this field in the physical schema to get its physical type
-                    physical_file_schema
-                        .field_with_name(field_name)
-                        .map(|phys_field| {
-                            Field::new(
-                                field_name,
-                                merge_field_types(phys_field, logical_field),
-                                phys_field.is_nullable(),
-                            )
-                        })
-                        .unwrap_or_else(|_| (*logical_field).clone())
-                })
-                .collect();
-
-            let projected_physical_schema =
-                Arc::new(arrow_schema::Schema::new(projected_physical_fields));
-
-            // Create a second mapping from the projected physical schema (what Vortex returns)
-            // to the final projected schema. This mapping will handle type casting without reordering.
-            let (batch_schema_mapping, _) =
-                schema_adapter.map_schema(&projected_physical_schema)?;
 
             // We share our layout readers with others partitions in the scan, so we can only need to read each layout in each file once.
             let layout_reader = match layout_reader.entry(file_meta.object_meta.location.clone()) {
@@ -390,7 +361,7 @@ impl FileOpener for VortexOpener {
                     ))))
                 })
                 .try_flatten()
-                .map(move |batch| batch.and_then(|b| batch_schema_mapping.map_batch(b)))
+                .map(move |batch| batch.and_then(|b| schema_mapping.map_batch(b)))
                 .boxed();
 
             Ok(stream)
