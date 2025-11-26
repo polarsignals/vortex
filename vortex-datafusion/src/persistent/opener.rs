@@ -870,4 +870,81 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    // Minimal reproducing test for the schema projection bug.
+    // Before the fix, this would fail with a cast error when the file schema
+    // and table schema have different field orders and we project a subset of columns.
+    async fn test_projection_bug_minimal_repro() -> anyhow::Result<()> {
+        let object_store = Arc::new(InMemory::new()) as Arc<dyn ObjectStore>;
+        let file_path = "/path/file.vortex";
+
+        // File has columns in order: a, b, c with simple types
+        let batch = record_batch!(
+            ("a", Int32, vec![Some(1)]),
+            ("b", Utf8, vec![Some("test")]),
+            ("c", Int32, vec![Some(2)])
+        )
+        .unwrap();
+        let data_size = write_arrow_to_vortex(object_store.clone(), file_path, batch).await?;
+
+        // Table schema has columns in DIFFERENT order: c, a, b
+        // and different types that require casting (Utf8 -> Dictionary)
+        let table_schema = Arc::new(Schema::new(vec![
+            Field::new("c", DataType::Int32, true),
+            Field::new("a", DataType::Int32, true),
+            Field::new(
+                "b",
+                DataType::Dictionary(Box::new(DataType::UInt32), Box::new(DataType::Utf8)),
+                true,
+            ),
+        ]));
+
+        // Project columns [0, 2] from table schema, which should give us: c, b
+        // Before the fix, the schema adapter would get confused about which fields
+        // to select from the file, causing incorrect type mappings.
+        let projection = vec![0, 2];
+
+        let opener = VortexOpener {
+            session: SESSION.clone(),
+            object_store: object_store.clone(),
+            projection: Some(projection.into()),
+            filter: None,
+            file_pruning_predicate: None,
+            expr_adapter_factory: Some(Arc::new(DefaultPhysicalExprAdapterFactory) as _),
+            schema_adapter_factory: Arc::new(DefaultSchemaAdapterFactory),
+            partition_fields: vec![],
+            file_cache: VortexFileCache::new(1, 1, SESSION.clone()),
+            logical_schema: table_schema.clone(),
+            batch_size: 100,
+            limit: None,
+            metrics: Default::default(),
+            layout_readers: Default::default(),
+            has_output_ordering: false,
+        };
+
+        // This should succeed and return the correctly projected and cast data
+        let data = opener
+            .open(
+                make_meta(file_path, data_size),
+                PartitionedFile::new(file_path.to_string(), data_size),
+            )?
+            .await?
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        // Verify the columns are in the right order and have the right values
+        use datafusion::arrow::util::pretty::pretty_format_batches_with_options;
+        let format_opts = FormatOptions::new().with_types_info(true);
+        assert_snapshot!(pretty_format_batches_with_options(&data, &format_opts)?.to_string(), @r"
+        +-------+--------------------------+
+        | c     | b                        |
+        | Int32 | Dictionary(UInt32, Utf8) |
+        +-------+--------------------------+
+        | 2     | test                     |
+        +-------+--------------------------+
+        ");
+
+        Ok(())
+    }
 }
