@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-pub mod display;
 mod operator;
-pub mod session;
-pub mod transform;
 mod visitor;
 
 use std::any::Any;
@@ -50,11 +47,11 @@ use crate::compute::InvocationArgs;
 use crate::compute::IsConstantOpts;
 use crate::compute::Output;
 use crate::compute::is_constant_opts;
+use crate::expr::stats::Precision;
 use crate::expr::stats::Stat;
+use crate::expr::stats::StatsProviderExt;
 use crate::hash;
 use crate::serde::ArrayChildren;
-use crate::stats::Precision;
-use crate::stats::StatsProviderExt;
 use crate::stats::StatsSetRef;
 use crate::vtable::ArrayId;
 use crate::vtable::ArrayVTable;

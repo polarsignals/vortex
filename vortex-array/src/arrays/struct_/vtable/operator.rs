@@ -8,8 +8,6 @@ use vortex_vector::Vector;
 use vortex_vector::struct_::StructVector;
 
 use crate::ArrayRef;
-use crate::array::transform::ArrayParentReduceRule;
-use crate::array::transform::ArrayRuleContext;
 use crate::arrays::StructArray;
 use crate::arrays::StructVTable;
 use crate::arrays::expr::ExprArray;
@@ -20,6 +18,8 @@ use crate::execution::BatchKernelRef;
 use crate::execution::BindCtx;
 use crate::execution::kernel;
 use crate::expr::session::ExprSession;
+use crate::transform::ArrayParentReduceRule;
+use crate::transform::ArrayRuleContext;
 use crate::vtable::OperatorVTable;
 use crate::vtable::ValidityHelper;
 
@@ -84,7 +84,6 @@ impl ArrayParentReduceRule<StructVTable, ExprVTable> for StructExprPartitionRule
 
 #[cfg(test)]
 mod tests {
-
     use vortex_dtype::FieldNames;
     use vortex_dtype::Nullability::NonNullable;
     use vortex_dtype::PTypeDowncast;

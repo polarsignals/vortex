@@ -9,8 +9,6 @@ use vortex_vector::primitive::PVector;
 
 use crate::ArrayRef;
 use crate::IntoArray;
-use crate::array::transform::ArrayParentReduceRule;
-use crate::array::transform::ArrayRuleContext;
 use crate::arrays::MaskedArray;
 use crate::arrays::MaskedVTable;
 use crate::arrays::PrimitiveArray;
@@ -18,6 +16,8 @@ use crate::arrays::PrimitiveVTable;
 use crate::execution::BatchKernelRef;
 use crate::execution::BindCtx;
 use crate::execution::kernel;
+use crate::transform::ArrayParentReduceRule;
+use crate::transform::ArrayRuleContext;
 use crate::vtable::OperatorVTable;
 use crate::vtable::ValidityHelper;
 
