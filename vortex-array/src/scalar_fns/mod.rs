@@ -19,6 +19,8 @@ use crate::expr::Expression;
 use crate::expr::ScalarFnExprExt;
 
 pub mod cast;
+pub mod is_null;
+pub mod not;
 
 /// A collection of built-in scalar functions that can be applied to expressions or arrays.
 pub trait BuiltinScalarFns: Sized {
