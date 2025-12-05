@@ -20,6 +20,7 @@ use crate::expr::Expression;
 use crate::expr::ScalarFnExprExt;
 use crate::expr::functions::EmptyOptions;
 
+pub mod binary;
 pub mod cast;
 pub mod get_item;
 pub mod is_null;
