@@ -6,12 +6,25 @@ use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use futures::future::{Fuse, LocalBoxFuture, ready};
-use futures::{FutureExt, StreamExt, TryStreamExt, pin_mut, select};
-use vortex_array::iter::{ArrayIterator, ArrayIteratorExt};
-use vortex_array::stats::{PRUNING_STATS, Stat};
-use vortex_array::stream::{ArrayStream, ArrayStreamAdapter, ArrayStreamExt, SendableArrayStream};
-use vortex_array::{ArrayContext, ArrayRef};
+use futures::FutureExt;
+use futures::StreamExt;
+use futures::TryStreamExt;
+use futures::future::Fuse;
+use futures::future::LocalBoxFuture;
+use futures::future::ready;
+use futures::pin_mut;
+use futures::select;
+use vortex_array::ArrayContext;
+use vortex_array::ArrayRef;
+use vortex_array::iter::ArrayIterator;
+use vortex_array::iter::ArrayIteratorExt;
+use vortex_array::ArraySessionExt;
+use vortex_array::stats::PRUNING_STATS;
+use vortex_array::stats::Stat;
+use vortex_array::stream::ArrayStream;
+use vortex_array::stream::ArrayStreamAdapter;
+use vortex_array::stream::ArrayStreamExt;
+use vortex_array::stream::SendableArrayStream;
 use vortex_buffer::ByteBuffer;
 use vortex_dtype::DType;
 use vortex_error::{VortexError, VortexExpect, VortexResult, vortex_bail, vortex_err};
@@ -116,8 +129,12 @@ impl VortexWriteOptions {
         mut write: W,
         stream: SendableArrayStream,
     ) -> VortexResult<WriteSummary> {
-        // Set up a Context to capture the encodings used in the file.
-        let ctx = ArrayContext::empty();
+        // NOTE(os): Setup an array context that already has all known encodings pre-populated.
+        // This is preferred for now over having an empty context here, because only the
+        // serialised array order is deterministic. The serialisation of arrays are done
+        // parallel and with an empty context they can register their encodings to the context
+        // in different order, changing the written bytes from run to run.
+        let ctx = ArrayContext::from_registry_sorted(self.session.arrays().registry());
         let dtype = stream.dtype().clone();
 
         let (mut ptr, eof) = SequenceId::root().split();
