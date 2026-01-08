@@ -359,7 +359,7 @@ fn arrow_compare(
         BooleanArray::new(values, nulls)
     } else {
         let lhs = Datum::try_new(left)?;
-        let rhs = Datum::try_new_with_target_datatype(right, lhs.data_type())?;
+        let rhs = Datum::try_new(right)?;
 
         match operator {
             Operator::Eq => cmp::eq(&lhs, &rhs)?,

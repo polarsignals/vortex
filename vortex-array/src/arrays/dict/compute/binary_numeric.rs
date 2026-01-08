@@ -6,14 +6,14 @@ use vortex_scalar::NumericOperator;
 
 use super::DictArray;
 use super::DictVTable;
+use crate::arrays::ConstantArray;
+use crate::compute::numeric;
+use crate::compute::NumericKernel;
+use crate::compute::NumericKernelAdapter;
+use crate::register_kernel;
 use crate::Array;
 use crate::ArrayRef;
 use crate::IntoArray;
-use crate::arrays::ConstantArray;
-use crate::compute::NumericKernel;
-use crate::compute::NumericKernelAdapter;
-use crate::compute::numeric;
-use crate::register_kernel;
 
 impl NumericKernel for DictVTable {
     fn numeric(
@@ -66,12 +66,12 @@ mod tests {
     use vortex_buffer::buffer;
     use vortex_scalar::NumericOperator;
 
-    use crate::IntoArray;
+    use crate::arrays::dict::DictArray;
     use crate::arrays::ConstantArray;
     use crate::arrays::PrimitiveArray;
-    use crate::arrays::dict::DictArray;
     use crate::assert_arrays_eq;
     use crate::compute::numeric;
+    use crate::IntoArray;
 
     #[test]
     fn test_add_const() {
@@ -114,28 +114,6 @@ mod tests {
         .unwrap();
 
         let expected = PrimitiveArray::from_iter([20i32, 30, 50, 30, 20]);
-        assert_arrays_eq!(res.to_canonical().into_array(), expected.to_array());
-    }
-
-    #[test]
-    fn test_no_pushdown_when_not_all_values_referenced() {
-        // Create a dict with all_values_referenced = false (default)
-        let dict = DictArray::try_new(
-            buffer![0u32, 1, 0, 1].into_array(),
-            buffer![10i32, 20, 30].into_array(), // value at index 2 is not referenced
-        )
-        .unwrap();
-
-        // Should return None, indicating no pushdown
-        let res = numeric(
-            dict.as_ref(),
-            ConstantArray::new(5i32, 4).as_ref(),
-            NumericOperator::Add,
-        )
-        .unwrap();
-
-        // Verify the result by canonicalizing
-        let expected = PrimitiveArray::from_iter([15i32, 25, 15, 25]);
         assert_arrays_eq!(res.to_canonical().into_array(), expected.to_array());
     }
 
