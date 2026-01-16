@@ -117,6 +117,16 @@ impl VTable for ByteBoolVTable {
 
         Ok(())
     }
+
+    fn slice(array: &ByteBoolArray, range: Range<usize>) -> VortexResult<Option<ArrayRef>> {
+        Ok(Some(
+            ByteBoolArray::new(
+                array.buffer().slice(range.clone()),
+                array.validity().slice(range),
+            )
+            .into_array(),
+        ))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -213,14 +223,6 @@ impl CanonicalVTable<ByteBoolVTable> for ByteBoolVTable {
 }
 
 impl OperationsVTable<ByteBoolVTable> for ByteBoolVTable {
-    fn slice(array: &ByteBoolArray, range: Range<usize>) -> ArrayRef {
-        ByteBoolArray::new(
-            array.buffer().slice(range.clone()),
-            array.validity().slice(range),
-        )
-        .into_array()
-    }
-
     fn scalar_at(array: &ByteBoolArray, index: usize) -> Scalar {
         Scalar::bool(array.buffer()[index] == 1, array.dtype().nullability())
     }
