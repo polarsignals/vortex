@@ -35,7 +35,6 @@ use vortex_array::vtable::ArrayId;
 use vortex_array::vtable::ArrayVTable;
 use vortex_array::vtable::ArrayVTableExt;
 use vortex_array::vtable::BaseArrayVTable;
-use vortex_array::vtable::EncodeVTable;
 use vortex_array::vtable::NotSupported;
 use vortex_array::vtable::VTable;
 use vortex_array::vtable::ValidityChild;
@@ -51,8 +50,6 @@ use vortex_error::vortex_bail;
 use vortex_error::vortex_ensure;
 use vortex_error::vortex_err;
 
-use crate::fsst_compress;
-use crate::fsst_train_compressor;
 use crate::kernel::PARENT_KERNELS;
 
 vtable!(FSST);
@@ -81,7 +78,6 @@ impl VTable for FSSTVTable {
     type ValidityVTable = ValidityVTableFromChild;
     type VisitorVTable = Self;
     type ComputeVTable = NotSupported;
-    type EncodeVTable = Self;
 
     fn id(&self) -> ArrayId {
         ArrayId::new_ref("vortex.fsst")
@@ -404,23 +400,6 @@ impl BaseArrayVTable<FSSTVTable> for FSSTVTable {
 impl ValidityChild<FSSTVTable> for FSSTVTable {
     fn validity_child(array: &FSSTArray) -> &ArrayRef {
         &array.codes_array
-    }
-}
-
-impl EncodeVTable<FSSTVTable> for FSSTVTable {
-    fn encode(
-        _vtable: &FSSTVTable,
-        canonical: &Canonical,
-        like: Option<&FSSTArray>,
-    ) -> VortexResult<Option<FSSTArray>> {
-        let array = canonical.clone().into_varbinview();
-
-        let compressor = match like {
-            Some(like) => Compressor::rebuild_from(like.symbols(), like.symbol_lengths()),
-            None => fsst_train_compressor(&array),
-        };
-
-        Ok(Some(fsst_compress(array, &compressor)))
     }
 }
 

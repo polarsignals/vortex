@@ -27,7 +27,6 @@ use crate::vtable;
 use crate::vtable::ArrayId;
 use crate::vtable::ArrayVTable;
 use crate::vtable::ArrayVTableExt;
-use crate::vtable::NotSupported;
 use crate::vtable::VTable;
 
 mod array;
@@ -54,7 +53,6 @@ impl VTable for ChunkedVTable {
     type ValidityVTable = Self;
     type VisitorVTable = Self;
     type ComputeVTable = Self;
-    type EncodeVTable = NotSupported;
 
     fn id(&self) -> ArrayId {
         ArrayId::new_ref("vortex.chunked")
