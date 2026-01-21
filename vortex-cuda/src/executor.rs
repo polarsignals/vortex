@@ -10,15 +10,23 @@ use cudarc::driver::CudaEvent;
 use cudarc::driver::CudaFunction;
 use cudarc::driver::CudaSlice;
 use cudarc::driver::CudaStream;
+use cudarc::driver::DevicePtrMut;
 use cudarc::driver::DeviceRepr;
+use cudarc::driver::DriverError;
 use cudarc::driver::LaunchArgs;
-use cudarc::driver::ValidAsZeroBits;
+use cudarc::driver::result;
+use cudarc::driver::result::memcpy_htod_async;
+use cudarc::driver::sys;
 use cudarc::driver::sys::CUevent_flags;
+use futures::future::BoxFuture;
+use kanal::Sender;
+use result::stream;
 use vortex_array::Array;
 use vortex_array::ArrayRef;
 use vortex_array::Canonical;
 use vortex_array::VortexSessionExecute;
 use vortex_array::buffer::BufferHandle;
+use vortex_buffer::Buffer;
 use vortex_dtype::PType;
 use vortex_error::VortexResult;
 use vortex_error::vortex_err;
@@ -27,6 +35,76 @@ use vortex_session::VortexSession;
 use crate::CudaDeviceBuffer;
 use crate::CudaSession;
 use crate::session::CudaSessionExt;
+
+/// Registers a callback and asynchronously waits for its completion.
+///
+/// This function can be used to asynchronously wait for events previously
+/// submitted to the stream to complete, e.g. async device buffer allocations.
+///
+/// Note: This is not equivalent to calling sync on a stream but only awaits
+/// the registered callback to complete.
+///
+/// # Arguments
+///
+/// * `stream` - The CUDA stream to wait on
+pub async fn await_stream_callback(stream: &CudaStream) -> Result<(), DriverError> {
+    let rx = register_stream_callback(stream)?;
+
+    rx.recv()
+        .await
+        .map_err(|_| DriverError(sys::CUresult::CUDA_ERROR_UNKNOWN))
+}
+
+/// Registers a host function callback on the stream.
+///
+/// # Returns
+///
+/// An async receiver that receives a message when all preceding work on the
+/// stream completes.
+///
+/// # Errors
+///
+/// Returns an error if registering the host callback function fails.
+fn register_stream_callback(stream: &CudaStream) -> Result<kanal::AsyncReceiver<()>, DriverError> {
+    let (tx, rx) = kanal::bounded::<()>(1);
+
+    // There are 2 different scenarios how `tx` gets freed. When the callback
+    // is invoked or during cleanup in case the registration fails.
+    let tx_ptr = Box::into_raw(Box::new(tx));
+
+    /// Called from CUDA driver thread when all preceding work on the stream completes.
+    unsafe extern "C" fn callback(user_data: *mut std::ffi::c_void) {
+        // SAFETY: The memory of `tx` is manually managed has not been freed
+        // before. We have unique ownership and can therefore free it.
+        let tx = unsafe { Box::from_raw(user_data as *mut Sender<()>) };
+
+        // Blocking send as we're in a callback invoked by the CUDA driver.
+        #[expect(clippy::expect_used)]
+        tx.send(())
+            // A send should never fail. Panic otherwise.
+            .expect("CUDA callback receiver dropped unexpectedly");
+    }
+
+    // SAFETY:
+    // 1. Valid handle from the borrowed `CudaStream`.
+    // 2. Valid function pointer with the the correct signature
+    // 3. Valid user data pointer which is consumed exactly once
+    unsafe {
+        stream::launch_host_function(
+            stream.cu_stream(),
+            callback,
+            tx_ptr as *mut std::ffi::c_void,
+        )
+        .inspect_err(|_| {
+            // SAFETY: Registration failed, so callback will never run.
+            // Therefore, we need to free the `user_data` passed to the
+            // callback in the error case.
+            drop(Box::from_raw(tx_ptr));
+        })?;
+    }
+
+    Ok(rx.to_async())
+}
 
 /// CUDA kernel events recorded before and after kernel launch.
 #[derive(Debug)]
@@ -145,16 +223,18 @@ impl CudaExecutionCtx {
     }
 
     /// Allocates a typed buffer on the GPU.
-    pub fn alloc<T: DeviceRepr + ValidAsZeroBits>(&self, len: usize) -> VortexResult<CudaSlice<T>> {
+    ///
+    /// Note: Allocation is async in case the CUDA driver supports this.
+    ///
+    /// The condition for alloc to be async is support for memory pools:
+    /// `CU_DEVICE_ATTRIBUTE_MEMORY_POOLS_SUPPORTED`.
+    ///
+    /// Any kernel submitted to the stream after alloc can safely use the
+    /// memory, as operations on the stream are ordered sequentially.
+    pub fn device_alloc<T: DeviceRepr>(&self, len: usize) -> VortexResult<CudaSlice<T>> {
         // SAFETY: No safety guarantees for allocations on the GPU.
         unsafe {
             self.stream
-                // Note that alloc is async in case the device and driver support this.
-                //
-                // The condition for alloc to be async is support for memory pools:
-                // `CU_DEVICE_ATTRIBUTE_MEMORY_POOLS_SUPPORTED`. Any kernel
-                // submitted to the stream after alloc can safely use the memory,
-                // as operations on the stream are ordered sequentially.
                 .alloc::<T>(len)
                 .map_err(|e| vortex_err!("Failed to allocate device memory: {}", e))
         }
@@ -197,30 +277,52 @@ impl CudaExecutionCtx {
         Ok(CudaDeviceBuffer::new(cuda_slice))
     }
 
-    /// Ensures the buffer is on the CUDA device.
+    /// Copies a pinned host buffer to the device asynchronously.
     ///
-    /// Copies the data from host to device if the input buffer is on the host.
-    pub fn ensure_on_device<T: DeviceRepr + Send + Sync + 'static>(
+    /// Allocates device memory, schedules an async copy, and returns a future
+    /// that completes when the copy is finished.
+    ///
+    /// # Arguments
+    ///
+    /// * `handle` - The host buffer to copy. Must be a host buffer (not already on device).
+    ///
+    /// # Safety
+    ///
+    /// The returned future captures the source `BufferHandle` to keep the host
+    /// memory alive until the copy completes.
+    pub fn copy_buffer_to_device_async<T: DeviceRepr + Send + Sync + 'static>(
         &self,
-        handle: &BufferHandle,
-    ) -> VortexResult<BufferHandle> {
-        if handle.is_on_device() {
-            return Ok(handle.clone());
-        }
-
+        handle: BufferHandle,
+    ) -> VortexResult<BoxFuture<'static, VortexResult<BufferHandle>>> {
         let host_buffer = handle
             .as_host_opt()
             .ok_or_else(|| vortex_err!("Buffer is neither on host nor device"))?;
 
-        let typed_slice: &[T] = unsafe {
-            std::slice::from_raw_parts(
-                host_buffer.as_ptr().cast(),
-                host_buffer.len() / size_of::<T>(),
-            )
-        };
+        let mut cuda_slice: CudaSlice<T> = self.device_alloc(host_buffer.len() / size_of::<T>())?;
+        let device_ptr = cuda_slice.device_ptr_mut(&self.stream).0;
 
-        let cuda_buf = self.copy_buffer_to_device(typed_slice)?;
-        Ok(BufferHandle::new_device(Arc::new(cuda_buf)))
+        let typed_buffer: Buffer<T> = Buffer::from_byte_buffer(host_buffer.clone());
+        let src_slice: &[T] = typed_buffer.as_slice();
+
+        unsafe {
+            memcpy_htod_async(device_ptr, src_slice, self.stream.cu_stream())
+                .map_err(|e| vortex_err!("Failed to schedule async copy to device: {}", e))?;
+        }
+
+        let cuda_buf = CudaDeviceBuffer::new(cuda_slice);
+        let stream = Arc::clone(&self.stream);
+
+        Ok(Box::pin(async move {
+            // Await async copy completion using callback-based async wait.
+            await_stream_callback(&stream)
+                .await
+                .map_err(|e| vortex_err!("CUDA stream wait failed: {}", e))?;
+
+            // Keep source memory alive until copy completes.
+            let _keep_alive = handle;
+
+            Ok(BufferHandle::new_device(Arc::new(cuda_buf)))
+        }))
     }
 }
 
