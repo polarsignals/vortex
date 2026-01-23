@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+//! Downloads the nvCOMP SDK if needed and generates Rust FFI bindings for NVIDIA's
+//! GPU-accelerated Zstd compression.
+
 #![expect(clippy::unwrap_used)]
 #![expect(clippy::expect_used)]
 #![expect(clippy::panic)]
