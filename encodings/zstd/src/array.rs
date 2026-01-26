@@ -201,6 +201,27 @@ pub struct ZstdArray {
     slice_stop: usize,
 }
 
+/// The parts of a [`ZstdArray`] returned by [`ZstdArray::into_parts`].
+#[derive(Debug)]
+pub struct ZstdArrayParts {
+    /// The optional dictionary used for compression.
+    pub dictionary: Option<ByteBuffer>,
+    /// The compressed frames.
+    pub frames: Vec<ByteBuffer>,
+    /// The compression metadata.
+    pub metadata: ZstdMetadata,
+    /// The data type of the uncompressed array.
+    pub dtype: DType,
+    /// The validity of the uncompressed array.
+    pub validity: Validity,
+    /// The number of rows in the uncompressed array.
+    pub n_rows: usize,
+    /// Slice start offset.
+    pub slice_start: usize,
+    /// Slice stop offset.
+    pub slice_stop: usize,
+}
+
 struct Frames {
     dictionary: Option<ByteBuffer>,
     frames: Vec<ByteBuffer>,
@@ -247,7 +268,10 @@ fn collect_valid_vbv(vbv: &VarBinViewArray) -> VortexResult<(ByteBuffer, Vec<usi
     Ok(buffer_and_value_byte_indices)
 }
 
-fn reconstruct_views(buffer: ByteBuffer) -> Buffer<BinaryView> {
+/// Reconstruct BinaryView structs from length-prefixed byte data.
+///
+/// The buffer contains interleaved u32 lengths (little-endian) and string data.
+pub fn reconstruct_views(buffer: &ByteBuffer) -> Buffer<BinaryView> {
     let mut res = BufferMut::<BinaryView>::empty();
     let mut offset = 0;
     while offset < buffer.len() {
@@ -298,6 +322,7 @@ impl ZstdArray {
         level: i32,
         values_per_frame: usize,
         n_values: usize,
+        use_dictionary: bool,
     ) -> VortexResult<Frames> {
         let n_frames = frame_byte_starts.len();
 
@@ -312,7 +337,9 @@ impl ZstdArray {
         }
         debug_assert_eq!(sample_sizes.iter().sum::<usize>(), value_bytes.len());
 
-        let (dictionary, mut compressor) = if sample_sizes.len() < MIN_SAMPLES_FOR_DICTIONARY {
+        let (dictionary, mut compressor) = if !use_dictionary
+            || sample_sizes.len() < MIN_SAMPLES_FOR_DICTIONARY
+        {
             // no dictionary
             (None, zstd::bulk::Compressor::new(level)?)
         } else {
@@ -351,10 +378,46 @@ impl ZstdArray {
         })
     }
 
+    /// Creates a ZstdArray from a primitive array.
+    ///
+    /// # Arguments
+    /// * `parray` - The primitive array to compress
+    /// * `level` - Zstd compression level (0 = default, negative = fast, positive = better compression)
+    /// * `values_per_frame` - Number of values per frame (0 = single frame)
     pub fn from_primitive(
         parray: &PrimitiveArray,
         level: i32,
         values_per_frame: usize,
+    ) -> VortexResult<Self> {
+        Self::from_primitive_impl(parray, level, values_per_frame, true)
+    }
+
+    /// Creates a ZstdArray from a primitive array without using a dictionary.
+    ///
+    /// This is useful when the compressed data will be decompressed by systems
+    /// that don't support ZSTD dictionaries (e.g., nvCOMP on GPU).
+    ///
+    /// Note: Without a dictionary, each frame is compressed independently.
+    /// Dictionaries are trained from sample data from previously seen frames,
+    /// to improve compression ratio.
+    ///
+    /// # Arguments
+    /// * `parray` - The primitive array to compress
+    /// * `level` - Zstd compression level (0 = default, negative = fast, positive = better compression)
+    /// * `values_per_frame` - Number of values per frame (0 = single frame)
+    pub fn from_primitive_without_dict(
+        parray: &PrimitiveArray,
+        level: i32,
+        values_per_frame: usize,
+    ) -> VortexResult<Self> {
+        Self::from_primitive_impl(parray, level, values_per_frame, false)
+    }
+
+    fn from_primitive_impl(
+        parray: &PrimitiveArray,
+        level: i32,
+        values_per_frame: usize,
+        use_dictionary: bool,
     ) -> VortexResult<Self> {
         let dtype = parray.dtype().clone();
         let byte_width = parray.ptype().byte_width();
@@ -386,6 +449,7 @@ impl ZstdArray {
             level,
             values_per_frame,
             n_values,
+            use_dictionary,
         )?;
 
         let metadata = ZstdMetadata {
@@ -406,10 +470,46 @@ impl ZstdArray {
         ))
     }
 
+    /// Creates a ZstdArray from a VarBinView array.
+    ///
+    /// # Arguments
+    /// * `vbv` - The VarBinView array to compress
+    /// * `level` - Zstd compression level (0 = default, negative = fast, positive = better compression)
+    /// * `values_per_frame` - Number of values per frame (0 = single frame)
     pub fn from_var_bin_view(
         vbv: &VarBinViewArray,
         level: i32,
         values_per_frame: usize,
+    ) -> VortexResult<Self> {
+        Self::from_var_bin_view_impl(vbv, level, values_per_frame, true)
+    }
+
+    /// Creates a ZstdArray from a VarBinView array without using a dictionary.
+    ///
+    /// This is useful when the compressed data will be decompressed by systems
+    /// that don't support ZSTD dictionaries (e.g., nvCOMP on GPU).
+    ///
+    /// Note: Without a dictionary, each frame is compressed independently.
+    /// Dictionaries are trained from sample data from previously seen frames,
+    /// to improve compression ratio.
+    ///
+    /// # Arguments
+    /// * `vbv` - The VarBinView array to compress
+    /// * `level` - Zstd compression level (0 = default, negative = fast, positive = better compression)
+    /// * `values_per_frame` - Number of values per frame (0 = single frame)
+    pub fn from_var_bin_view_without_dict(
+        vbv: &VarBinViewArray,
+        level: i32,
+        values_per_frame: usize,
+    ) -> VortexResult<Self> {
+        Self::from_var_bin_view_impl(vbv, level, values_per_frame, false)
+    }
+
+    fn from_var_bin_view_impl(
+        vbv: &VarBinViewArray,
+        level: i32,
+        values_per_frame: usize,
+        use_dictionary: bool,
     ) -> VortexResult<Self> {
         // Approach for strings: we prefix each string with its length as a u32.
         // This is the same as what Parquet does. In some cases it may be better
@@ -441,6 +541,7 @@ impl ZstdArray {
             level,
             values_per_frame,
             n_values,
+            use_dictionary,
         )?;
 
         let metadata = ZstdMetadata {
@@ -615,7 +716,7 @@ impl ZstdArray {
                         // the decompressed buffer is a bunch of interleaved u32 lengths
                         // and strings of those lengths, we need to reconstruct the
                         // views into those strings by passing through the buffer.
-                        let valid_views = reconstruct_views(decompressed.clone()).slice(
+                        let valid_views = reconstruct_views(&decompressed).slice(
                             slice_value_idx_start - n_skipped_values
                                 ..slice_value_idx_stop - n_skipped_values,
                         );
@@ -640,7 +741,7 @@ impl ZstdArray {
                         // the decompressed buffer is a bunch of interleaved u32 lengths
                         // and strings of those lengths, we need to reconstruct the
                         // views into those strings by passing through the buffer.
-                        let valid_views = reconstruct_views(decompressed.clone()).slice(
+                        let valid_views = reconstruct_views(&decompressed).slice(
                             slice_value_idx_start - n_skipped_values
                                 ..slice_value_idx_stop - n_skipped_values,
                         );
@@ -688,6 +789,20 @@ impl ZstdArray {
             slice_stop: self.slice_start + stop,
             stats_set: Default::default(),
             ..self.clone()
+        }
+    }
+
+    /// Consumes the array and returns its parts.
+    pub fn into_parts(self) -> ZstdArrayParts {
+        ZstdArrayParts {
+            dictionary: self.dictionary,
+            frames: self.frames,
+            metadata: self.metadata,
+            dtype: self.dtype,
+            validity: self.unsliced_validity,
+            n_rows: self.unsliced_n_rows,
+            slice_start: self.slice_start,
+            slice_stop: self.slice_stop,
         }
     }
 

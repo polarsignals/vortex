@@ -33,10 +33,12 @@ vortex-decimal-byte-parts = { workspace = true }
 vortex-dtype = { workspace = true, features = ["cudarc"] }
 vortex-error = { workspace = true }
 vortex-fastlanes = { workspace = true }
+vortex-mask = { workspace = true }
 vortex-nvcomp = { path = "nvcomp" }
 vortex-session = { workspace = true }
 vortex-utils = { workspace = true }
 vortex-zigzag = { workspace = true }
+vortex-zstd = { workspace = true }
 
 [dev-dependencies]
 criterion = { package = "codspeed-criterion-compat-walltime", version = "4.3.0" }
@@ -55,4 +57,8 @@ harness = false
 
 [[bench]]
 name = "dict_cuda"
+harness = false
+
+[[bench]]
+name = "zstd_cuda"
 harness = false
