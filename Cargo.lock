@@ -2504,6 +2504,7 @@ dependencies = [
  "tokio",
  "url",
  "vortex-bench",
+ "vortex-cuda",
  "vortex-datafusion",
 ]
 
@@ -3814,6 +3815,7 @@ dependencies = [
  "url",
  "vortex",
  "vortex-bench",
+ "vortex-cuda",
  "vortex-duckdb",
 ]
 
@@ -10094,6 +10096,7 @@ dependencies = [
  "vortex-buffer",
  "vortex-bytebool",
  "vortex-compute",
+ "vortex-cuda",
  "vortex-datetime-parts",
  "vortex-decimal-byte-parts",
  "vortex-dtype",
@@ -10643,10 +10646,12 @@ dependencies = [
  "itertools 0.14.0",
  "libfuzzer-sys",
  "strum 0.27.2",
+ "tokio",
  "vortex",
  "vortex-array",
  "vortex-btrblocks",
  "vortex-buffer",
+ "vortex-cuda",
  "vortex-dtype",
  "vortex-error",
  "vortex-file",
@@ -10797,6 +10802,7 @@ name = "vortex-nvcomp"
 version = "0.1.0"
 dependencies = [
  "bindgen",
+ "libloading 0.8.9",
  "reqwest",
  "tar",
  "xz2",

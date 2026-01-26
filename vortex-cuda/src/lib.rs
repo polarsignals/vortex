@@ -3,6 +3,8 @@
 
 //! CUDA support for Vortex arrays.
 
+use std::process::Command;
+
 mod canonical;
 mod device_buffer;
 pub mod executor;
@@ -25,6 +27,7 @@ pub use kernel::ZstdKernelPrep;
 pub use kernel::launch_cuda_kernel_impl;
 pub use kernel::zstd_kernel_prepare;
 pub use session::CudaSession;
+pub use session::CudaSessionExt;
 use vortex_alp::ALPVTable;
 use vortex_array::arrays::DictVTable;
 use vortex_decimal_byte_parts::DecimalBytePartsVTable;
@@ -32,6 +35,14 @@ use vortex_fastlanes::FoRVTable;
 pub use vortex_nvcomp as nvcomp;
 use vortex_zigzag::ZigZagVTable;
 use vortex_zstd::ZstdVTable;
+
+/// Checks if CUDA is available on the system by looking for nvcc.
+pub fn cuda_available() -> bool {
+    Command::new("nvcc")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
 
 /// Registers CUDA kernels.
 pub fn initialize_cuda(session: &CudaSession) {
