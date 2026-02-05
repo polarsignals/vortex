@@ -32,6 +32,12 @@ jobs:
         with:
           sync: false
           prune-cache: false
+      - name: Generate changelog from GitHub releases
+        run: uv run docs/generate_changelog.py
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Doxygen
+        uses: ssciwr/doxygen-install@v1
       - name: Generate Javadoc for Java projects
         run: |
           cd java

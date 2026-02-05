@@ -105,6 +105,8 @@ jobs:
         with:
           sync: false
           prune-cache: false
+      - name: Install Doxygen
+        uses: ssciwr/doxygen-install@v1
 
       - name: Pytest - Vortex
         run: |
