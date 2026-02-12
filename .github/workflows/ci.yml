@@ -584,6 +584,14 @@ jobs:
         run: |
           cargo nextest run --locked --workspace --all-features --no-fail-fast --exclude vortex-bench --exclude xtask --exclude vortex-sqllogictest
 
+      - name: Alert incident.io
+        if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        uses: ./.github/actions/alert-incident-io
+        with:
+          api-key: ${{ secrets.INCIDENT_IO_ALERT_TOKEN }}
+          alert-title: "Rust tests (${{ matrix.os }}) failed on develop"
+          deduplication-key: ci-rust-test-${{ matrix.os }}-failure
+
   build-java:
     name: "Java"
     runs-on:
