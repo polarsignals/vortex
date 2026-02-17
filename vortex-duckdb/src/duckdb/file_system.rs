@@ -19,23 +19,14 @@ use vortex::io::CoalesceConfig;
 use vortex::io::IoBuf;
 use vortex::io::VortexReadAt;
 use vortex::io::VortexWrite;
+use vortex::io::file::object_store;
+use vortex::io::file::std_file;
 use vortex::io::runtime::BlockingRuntime;
 
 use crate::RUNTIME;
 use crate::cpp;
 use crate::duckdb::ClientContext;
 use crate::lifetime_wrapper;
-
-const DEFAULT_COALESCE: CoalesceConfig = CoalesceConfig {
-    distance: 1024 * 1024,     // 1 MB
-    max_size: 8 * 1024 * 1024, // 8 MB
-};
-
-// Local cap to keep remote reads parallel without overwhelming typical per-host connection limits.
-// The DuckDB httpfs extension does not expose a fixed default concurrency in the vendored sources;
-// 64 is a conservative ceiling that stays well below common cloud limits while keeping range reads
-// busy.
-const DEFAULT_CONCURRENCY: usize = 64;
 
 lifetime_wrapper!(FsFileHandle, cpp::duckdb_vx_file_handle, cpp::duckdb_vx_fs_close, [owned, ref]);
 unsafe impl Send for FsFileHandle {}
@@ -96,6 +87,7 @@ pub(crate) struct DuckDbFsReader {
     handle: Arc<FsFileHandle>,
     uri: Arc<str>,
     size: Arc<OnceLock<u64>>,
+    is_local: bool,
 }
 
 impl DuckDbFsReader {
@@ -110,10 +102,13 @@ impl DuckDbFsReader {
             return Err(fs_error(err));
         }
 
+        let is_local = url.scheme() == "file";
+
         Ok(Self {
             handle: Arc::new(unsafe { FsFileHandle::own(handle) }),
             uri: Arc::from(url.as_str()),
             size: Arc::new(OnceLock::new()),
+            is_local,
         })
     }
 }
@@ -124,11 +119,19 @@ impl VortexReadAt for DuckDbFsReader {
     }
 
     fn coalesce_config(&self) -> Option<CoalesceConfig> {
-        Some(DEFAULT_COALESCE)
+        if self.is_local {
+            Some(CoalesceConfig::local())
+        } else {
+            Some(CoalesceConfig::object_storage())
+        }
     }
 
     fn concurrency(&self) -> usize {
-        DEFAULT_CONCURRENCY
+        if self.is_local {
+            std_file::DEFAULT_CONCURRENCY
+        } else {
+            object_store::DEFAULT_CONCURRENCY
+        }
     }
 
     fn size(&self) -> BoxFuture<'static, VortexResult<u64>> {
