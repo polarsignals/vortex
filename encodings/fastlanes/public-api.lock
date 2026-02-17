@@ -200,10 +200,6 @@ impl vortex_array::arrays::slice::SliceKernel for vortex_fastlanes::BitPackedVTa
 
 pub fn vortex_fastlanes::BitPackedVTable::slice(array: &vortex_fastlanes::BitPackedArray, range: core::ops::range::Range<usize>, _ctx: &mut vortex_array::executor::ExecutionCtx) -> vortex_error::VortexResult<core::option::Option<vortex_array::array::ArrayRef>>
 
-impl vortex_array::compute::between::BetweenKernel for vortex_fastlanes::BitPackedVTable
-
-pub fn vortex_fastlanes::BitPackedVTable::between(&self, array: &vortex_fastlanes::BitPackedArray, lower: &dyn vortex_array::array::Array, upper: &dyn vortex_array::array::Array, options: &vortex_array::compute::between::BetweenOptions) -> vortex_error::VortexResult<core::option::Option<vortex_array::array::ArrayRef>>
-
 impl vortex_array::compute::is_constant::IsConstantKernel for vortex_fastlanes::BitPackedVTable
 
 pub fn vortex_fastlanes::BitPackedVTable::is_constant(&self, array: &vortex_fastlanes::BitPackedArray, opts: &vortex_array::compute::is_constant::IsConstantOpts) -> vortex_error::VortexResult<core::option::Option<bool>>
