@@ -34,7 +34,8 @@ futures = { workspace = true, features = ["executor"] }
 kanal = { workspace = true }
 paste = { workspace = true }
 prost = { workspace = true }
-tracing = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
+tracing = { workspace = true, features = ["std", "attributes"] }
 vortex-alp = { workspace = true }
 vortex-array = { workspace = true }
 vortex-buffer = { workspace = true }
