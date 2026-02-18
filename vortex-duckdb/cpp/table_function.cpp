@@ -3,6 +3,7 @@
 
 #include "duckdb.h"
 #include "duckdb/catalog/catalog.hpp"
+#include "duckdb/main/capi/capi_internal.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/common/insertion_order_preserving_map.hpp"
@@ -86,7 +87,7 @@ unique_ptr<FunctionData> c_bind(ClientContext &context,
     };
 
     duckdb_vx_error error_out = nullptr;
-    auto ctx = reinterpret_cast<duckdb_vx_client_context>(&context);
+    auto ctx = reinterpret_cast<duckdb_client_context>(&context);
     auto ffi_bind_data = info.vtab.bind(ctx,
                                         reinterpret_cast<duckdb_vx_tfunc_bind_input>(&input),
                                         reinterpret_cast<duckdb_vx_tfunc_bind_result>(&result),
@@ -109,7 +110,7 @@ unique_ptr<GlobalTableFunctionState> c_init_global(ClientContext &context, Table
         .projection_ids = input.projection_ids.data(),
         .projection_ids_count = input.projection_ids.size(),
         .filters = reinterpret_cast<duckdb_vx_table_filter_set>(input.filters.get()),
-        .client_context = reinterpret_cast<duckdb_vx_client_context>(&context),
+        .client_context = reinterpret_cast<duckdb_client_context>(&context),
     };
 
     duckdb_vx_error error_out = nullptr;
@@ -136,7 +137,7 @@ unique_ptr<LocalTableFunctionState> c_init_local(ExecutionContext &context,
         .projection_ids = input.projection_ids.data(),
         .projection_ids_count = input.projection_ids.size(),
         .filters = reinterpret_cast<duckdb_vx_table_filter_set>(input.filters.get()),
-        .client_context = reinterpret_cast<duckdb_vx_client_context>(&context),
+        .client_context = reinterpret_cast<duckdb_client_context>(&context),
     };
 
     duckdb_vx_error error_out = nullptr;
@@ -152,7 +153,7 @@ unique_ptr<LocalTableFunctionState> c_init_local(ExecutionContext &context,
 void c_function(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
     const auto &bind = input.bind_data->Cast<CTableBindData>();
 
-    auto ctx = reinterpret_cast<duckdb_vx_client_context>(&context);
+    auto ctx = reinterpret_cast<duckdb_client_context>(&context);
     const auto bind_data = bind.ffi_data->DataPtr();
     auto global_data = input.global_state->Cast<CTableGlobalData>().ffi_data->DataPtr();
     auto local_data = input.local_state->Cast<CTableLocalData>().ffi_data->DataPtr();
@@ -329,13 +330,13 @@ InsertionOrderPreservingMap<string> c_to_string(TableFunctionToStringInput &inpu
     return result;
 }
 
-extern "C" duckdb_state duckdb_vx_tfunc_register(duckdb_connection ffi_conn,
-                                                 const duckdb_vx_tfunc_vtab_t *vtab) {
-    if (!ffi_conn || !vtab) {
+extern "C" duckdb_state duckdb_vx_tfunc_register(duckdb_database ffi_db, const duckdb_vx_tfunc_vtab_t *vtab) {
+    if (!ffi_db || !vtab) {
         return DuckDBError;
     }
 
-    auto conn = reinterpret_cast<Connection *>(ffi_conn);
+    auto wrapper = reinterpret_cast<duckdb::DatabaseWrapper *>(ffi_db);
+    auto db = wrapper->database->instance;
     auto tf = TableFunction(vtab->name, {}, c_function, c_bind, c_init_global, c_init_local);
 
     tf.pushdown_complex_filter = c_pushdown_complex_filter;
@@ -365,11 +366,10 @@ extern "C" duckdb_state duckdb_vx_tfunc_register(duckdb_connection ffi_conn,
     tf.function_info = make_shared_ptr<CTableFunctionInfo>(*vtab);
 
     try {
-        conn->context->RunFunctionInTransaction([&]() {
-            auto &catalog = Catalog::GetSystemCatalog(*conn->context);
-            CreateTableFunctionInfo tf_info(tf);
-            catalog.CreateTableFunction(*conn->context, tf_info);
-        });
+        auto &system_catalog = Catalog::GetSystemCatalog(*db);
+        auto data = CatalogTransaction::GetSystemTransaction(*db);
+        CreateTableFunctionInfo tf_info(tf);
+        system_catalog.CreateFunction(data, tf_info);
     } catch (...) {
         return DuckDBError;
     }
@@ -396,5 +396,4 @@ extern "C" void duckdb_vx_string_map_free(duckdb_vx_string_map map) {
     auto *cpp_map = reinterpret_cast<InsertionOrderPreservingMap<string> *>(map);
     delete cpp_map;
 }
-
 } // namespace vortex
