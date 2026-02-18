@@ -10715,6 +10715,7 @@ version = "0.1.0"
 dependencies = [
  "arbitrary",
  "arrow-array",
+ "arrow-schema",
  "codspeed-divan-compat",
  "itertools 0.14.0",
  "num-traits",
