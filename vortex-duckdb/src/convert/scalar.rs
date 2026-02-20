@@ -66,7 +66,8 @@ impl ToDuckDBScalar for Scalar {
     /// Struct and List scalars are not yet implemented and cause a panic.
     fn try_to_duckdb_scalar(&self) -> VortexResult<Value> {
         if self.is_null() {
-            return Ok(Value::null(&LogicalType::try_from(self.dtype())?));
+            let lt = LogicalType::try_from(self.dtype())?;
+            return Ok(Value::null(&lt));
         }
 
         match self.dtype() {
@@ -116,7 +117,8 @@ impl ToDuckDBScalar for DecimalScalar<'_> {
             .ok_or_else(|| vortex_err!("decimal scalar without decimal dtype"))?;
 
         let Some(decimal_value) = self.decimal_value() else {
-            return Ok(Value::null(&LogicalType::try_from(self.dtype())?));
+            let lt = LogicalType::try_from(self.dtype())?;
+            return Ok(Value::null(&lt));
         };
 
         let huge_value = match decimal_value {
@@ -231,14 +233,14 @@ impl TryFrom<Value> for Scalar {
     type Error = VortexError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        Scalar::try_from(value.as_ref())
+        Scalar::try_from(&*value)
     }
 }
 
-impl<'a> TryFrom<ValueRef<'a>> for Scalar {
+impl<'a> TryFrom<&'a ValueRef> for Scalar {
     type Error = VortexError;
 
-    fn try_from(value: ValueRef<'a>) -> Result<Self, Self::Error> {
+    fn try_from(value: &'a ValueRef) -> Result<Self, Self::Error> {
         use crate::duckdb::ExtractedValue;
         let dtype = DType::from_logical_type(value.logical_type(), Nullable)?;
         match value.extract() {

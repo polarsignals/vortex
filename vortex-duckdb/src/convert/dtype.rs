@@ -60,17 +60,18 @@ use vortex::extension::datetime::Timestamp;
 
 use crate::cpp::DUCKDB_TYPE;
 use crate::duckdb::LogicalType;
+use crate::duckdb::LogicalTypeRef;
 
 pub trait FromLogicalType {
     fn from_logical_type(
-        logical_type: LogicalType,
+        logical_type: &LogicalTypeRef,
         nullability: Nullability,
     ) -> VortexResult<DType>;
 }
 
 impl FromLogicalType for DType {
     fn from_logical_type(
-        logical_type: LogicalType,
+        logical_type: &LogicalTypeRef,
         nullability: Nullability,
     ) -> VortexResult<DType> {
         Ok(match logical_type.as_type_id() {
@@ -125,21 +126,27 @@ impl FromLogicalType for DType {
             DUCKDB_TYPE::DUCKDB_TYPE_TIMESTAMP_NS => {
                 DType::Extension(Timestamp::new(TimeUnit::Nanoseconds, nullability).erased())
             }
-            DUCKDB_TYPE::DUCKDB_TYPE_ARRAY => DType::FixedSizeList(
-                Arc::new(DType::from_logical_type(
-                    logical_type.array_child_type(),
-                    Nullability::Nullable,
-                )?),
-                logical_type.array_type_array_size(),
-                nullability,
-            ),
-            DUCKDB_TYPE::DUCKDB_TYPE_LIST => DType::List(
-                Arc::new(DType::from_logical_type(
-                    logical_type.list_child_type(),
-                    Nullability::Nullable,
-                )?),
-                nullability,
-            ),
+            DUCKDB_TYPE::DUCKDB_TYPE_ARRAY => {
+                let child_type = logical_type.array_child_type();
+                DType::FixedSizeList(
+                    Arc::new(DType::from_logical_type(
+                        &child_type,
+                        Nullability::Nullable,
+                    )?),
+                    logical_type.array_type_array_size(),
+                    nullability,
+                )
+            }
+            DUCKDB_TYPE::DUCKDB_TYPE_LIST => {
+                let child_type = logical_type.list_child_type();
+                DType::List(
+                    Arc::new(DType::from_logical_type(
+                        &child_type,
+                        Nullability::Nullable,
+                    )?),
+                    nullability,
+                )
+            }
             DUCKDB_TYPE::DUCKDB_TYPE_STRUCT => DType::Struct(
                 (0..logical_type.struct_type_child_count())
                     .map(|i| {
@@ -147,7 +154,7 @@ impl FromLogicalType for DType {
                         let child_type = logical_type.struct_child_type(i);
                         Ok((
                             child_name,
-                            DType::from_logical_type(child_type, Nullability::Nullable)?,
+                            DType::from_logical_type(&child_type, Nullability::Nullable)?,
                         ))
                     })
                     .collect::<VortexResult<_>>()?,
@@ -168,9 +175,9 @@ impl FromLogicalType for DType {
     }
 }
 
-pub fn from_duckdb_table<I, S>(iter: I) -> VortexResult<StructFields>
+pub fn from_duckdb_table<'a, I, S>(iter: I) -> VortexResult<StructFields>
 where
-    I: Iterator<Item = (S, LogicalType, Nullability)>,
+    I: Iterator<Item = (S, &'a LogicalTypeRef, Nullability)>,
     S: AsRef<str>,
 {
     iter.map(|(name, type_, nullability)| {
