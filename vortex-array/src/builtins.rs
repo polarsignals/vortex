@@ -157,13 +157,17 @@ impl ArrayBuiltins for ArrayRef {
     }
 
     fn fill_null(&self, fill_value: impl Into<Scalar>) -> VortexResult<ArrayRef> {
+        let fill_value = fill_value.into();
+        if !self.dtype().is_nullable() {
+            return self.cast(fill_value.dtype().clone());
+        }
         FillNull
             .try_new_array(
                 self.len(),
                 EmptyOptions,
                 [
                     self.clone(),
-                    ConstantArray::new(fill_value.into(), self.len()).into_array(),
+                    ConstantArray::new(fill_value, self.len()).into_array(),
                 ],
             )?
             .optimize()
