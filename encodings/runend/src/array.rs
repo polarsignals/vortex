@@ -14,7 +14,11 @@ use vortex_array::IntoArray;
 use vortex_array::Precision;
 use vortex_array::ProstMetadata;
 use vortex_array::SerializeMetadata;
+use vortex_array::arrays::PrimitiveArray;
 use vortex_array::arrays::PrimitiveVTable;
+use vortex_array::arrays::TakeExecute;
+use vortex_array::arrays::VarBinViewArray;
+use vortex_array::arrays::VarBinViewVTable;
 use vortex_array::buffer::BufferHandle;
 use vortex_array::scalar::PValue;
 use vortex_array::search_sorted::SearchSorted;
@@ -186,12 +190,6 @@ impl RunEndArray {
             ends.dtype(),
         );
         vortex_ensure!(
-            values.dtype().is_primitive() || values.dtype().is_boolean(),
-            "RunEnd array can only have Bool or Primitive values, {} given",
-            values.dtype()
-        );
-
-        vortex_ensure!(
             ends.len() == values.len(),
             "run ends len != run values len, {} != {}",
             ends.len(),
@@ -288,32 +286,7 @@ impl RunEndArray {
     ///
     /// # Validation
     ///
-    /// The `ends` must be non-nullable unsigned integers. The values may be `Bool` or `Primitive`
-    /// types.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use vortex_array::arrays::{BoolArray, VarBinViewArray};
-    /// # use vortex_array::IntoArray;
-    /// # use vortex_buffer::buffer;
-    /// # use vortex_runend::RunEndArray;
-    ///
-    /// // Error to provide incorrectly-typed values!
-    /// let result = RunEndArray::try_new(
-    ///     buffer![1u8, 2u8].into_array(),
-    ///     VarBinViewArray::from_iter_str(["bad", "dtype"]).into_array(),
-    /// );
-    /// assert!(result.is_err());
-    ///
-    /// // This array is happy
-    /// let result = RunEndArray::try_new(
-    ///     buffer![1u8, 2u8].into_array(),
-    ///     BoolArray::from_iter([false, true]).into_array(),
-    /// );
-    ///
-    /// assert!(result.is_ok());
-    /// ```
+    /// The `ends` must be non-nullable unsigned integers.
     pub fn try_new(ends: ArrayRef, values: ArrayRef) -> VortexResult<Self> {
         let length: usize = if ends.is_empty() {
             0
@@ -484,6 +457,7 @@ pub(super) fn run_end_canonicalize(
     ctx: &mut ExecutionCtx,
 ) -> VortexResult<ArrayRef> {
     let pends = array.ends().clone().execute_as("ends", ctx)?;
+
     Ok(match array.dtype() {
         DType::Bool(_) => {
             let bools = array.values().clone().execute_as("values", ctx)?;
@@ -493,13 +467,27 @@ pub(super) fn run_end_canonicalize(
             let pvalues = array.values().clone().execute_as("values", ctx)?;
             runend_decode_primitive(pends, pvalues, array.offset(), array.len())?.into_array()
         }
-        _ => vortex_panic!("Only Primitive and Bool values are supported"),
+        DType::Utf8(_) | DType::Binary(_) => {
+            let num_runs = array.values().len();
+            let indices_values = PrimitiveArray::from_iter(0u64..num_runs as u64);
+            let flat_indices =
+                runend_decode_primitive(pends, indices_values, array.offset(), array.len())?;
+            let values = array
+                .values()
+                .clone()
+                .execute_as::<VarBinViewArray>("values", ctx)?;
+            VarBinViewVTable::take(&values, &flat_indices.into_array(), ctx)?
+                .vortex_expect("take varbinview should not return None")
+        }
+        _ => vortex_bail!("Unsupported RunEnd value type: {}", array.dtype()),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use vortex_array::IntoArray;
+    use vortex_array::arrays::DictArray;
+    use vortex_array::arrays::VarBinViewArray;
     use vortex_array::assert_arrays_eq;
     use vortex_buffer::buffer;
     use vortex_dtype::DType;
@@ -524,6 +512,35 @@ mod tests {
         // 2, 3, 4 => 2
         // 5, 6, 7, 8, 9 => 3
         let expected = buffer![1, 1, 2, 2, 2, 3, 3, 3, 3, 3].into_array();
+        assert_arrays_eq!(arr.to_array(), expected);
+    }
+
+    #[test]
+    fn test_runend_utf8() {
+        let values = VarBinViewArray::from_iter_str(["a", "b", "c"]).into_array();
+        let arr = RunEndArray::new(buffer![2u32, 5, 10].into_array(), values);
+        assert_eq!(arr.len(), 10);
+        assert_eq!(arr.dtype(), &DType::Utf8(Nullability::NonNullable));
+
+        let expected =
+            VarBinViewArray::from_iter_str(["a", "a", "b", "b", "b", "c", "c", "c", "c", "c"])
+                .into_array();
+        assert_arrays_eq!(arr.to_array(), expected);
+    }
+
+    #[test]
+    fn test_runend_dict() {
+        let dict_values = VarBinViewArray::from_iter_str(["x", "y", "z"]).into_array();
+        let dict_codes = buffer![0u32, 1, 2].into_array();
+        let dict = DictArray::try_new(dict_codes, dict_values).unwrap();
+
+        let arr =
+            RunEndArray::try_new(buffer![2u32, 5, 10].into_array(), dict.into_array()).unwrap();
+        assert_eq!(arr.len(), 10);
+
+        let expected =
+            VarBinViewArray::from_iter_str(["x", "x", "y", "y", "y", "z", "z", "z", "z", "z"])
+                .into_array();
         assert_arrays_eq!(arr.to_array(), expected);
     }
 }
