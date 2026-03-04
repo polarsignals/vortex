@@ -8,6 +8,9 @@ use vortex_error::vortex_panic;
 use crate::ArrayRef;
 use crate::DynArray;
 use crate::IntoArray;
+use crate::LEGACY_SESSION;
+use crate::RecursiveCanonical;
+use crate::VortexSessionExecute;
 use crate::builtins::ArrayBuiltins;
 use crate::compute::MinMaxResult;
 use crate::compute::min_max;
@@ -18,7 +21,11 @@ use crate::scalar::Scalar;
 
 /// Cast and force execution via `to_canonical`, returning the canonical array.
 fn cast_and_execute(array: &ArrayRef, dtype: DType) -> VortexResult<ArrayRef> {
-    array.cast(dtype)?.to_canonical().map(|c| c.into_array())
+    Ok(array
+        .cast(dtype)?
+        .execute::<RecursiveCanonical>(&mut LEGACY_SESSION.create_execution_ctx())?
+        .0
+        .into_array())
 }
 
 /// Test conformance of the cast compute function for an array.
