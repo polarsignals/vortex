@@ -116,6 +116,7 @@ impl BtrBlocksCompressor {
     /// First canonicalizes and compacts the array, then applies optimal compression schemes.
     pub fn compress(&self, array: &dyn Array) -> VortexResult<ArrayRef> {
         // Canonicalize the array
+        // TODO(joe): receive `ctx` and use it.
         let canonical = array
             .to_array()
             .execute::<CanonicalValidity>(&mut LEGACY_SESSION.create_execution_ctx())?
