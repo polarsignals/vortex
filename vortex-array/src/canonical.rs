@@ -680,6 +680,7 @@ impl Executable for RecursiveCanonical {
                 })))
             }
             Canonical::List(l) => {
+                let zctl = l.is_zero_copy_to_list();
                 let ListViewArrayParts {
                     elements,
                     offsets,
@@ -694,6 +695,7 @@ impl Executable for RecursiveCanonical {
                         sizes.execute::<RecursiveCanonical>(ctx)?.0.into_array(),
                         validity.execute(ctx)?,
                     )
+                    .with_zero_copy_to_list(zctl)
                 })))
             }
             Canonical::FixedSizeList(fsl) => {
