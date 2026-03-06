@@ -57,6 +57,7 @@ use arrow_buffer::buffer::NullBuffer;
 use arrow_buffer::buffer::OffsetBuffer;
 use arrow_schema::DataType;
 use arrow_schema::TimeUnit as ArrowTimeUnit;
+use arrow_schema::extension::ExtensionType as _;
 use itertools::Itertools;
 use vortex_buffer::Alignment;
 use vortex_buffer::BitBuffer;
@@ -66,9 +67,13 @@ use vortex_dtype::DType;
 use vortex_dtype::DecimalDType;
 use vortex_dtype::IntegerPType;
 use vortex_dtype::NativePType;
+use vortex_dtype::Nullability;
 use vortex_dtype::PType;
 use vortex_dtype::datetime::TimeUnit;
+use vortex_dtype::extension::ExtDType;
 use vortex_dtype::i256;
+use vortex_dtype::uuid::Uuid;
+use vortex_dtype::uuid::UuidMetadata;
 use vortex_error::VortexExpect as _;
 use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
@@ -79,6 +84,7 @@ use crate::IntoArray;
 use crate::arrays::BoolArray;
 use crate::arrays::DecimalArray;
 use crate::arrays::DictArray;
+use crate::arrays::ExtensionArray;
 use crate::arrays::FixedSizeListArray;
 use crate::arrays::ListArray;
 use crate::arrays::ListViewArray;
@@ -384,6 +390,11 @@ impl FromArrowArray<&ArrowStructArray> for ArrayRef {
                 .iter()
                 .zip(value.fields())
                 .map(|(c, field)| {
+                    // Check for Arrow UUID extension type on the field.
+                    if field.extension_type_name() == Some(arrow_schema::extension::Uuid::NAME) {
+                        return uuid_from_arrow_fixed_size_binary(c.as_ref(), field.is_nullable());
+                    }
+
                     // Arrow pushes down nulls, even into non-nullable fields. So we strip them
                     // out here because Vortex is a little more strict.
                     if c.null_count() > 0 && !field.is_nullable() {
@@ -399,6 +410,47 @@ impl FromArrowArray<&ArrowStructArray> for ArrayRef {
         )?
         .into_array())
     }
+}
+
+/// Convert an Arrow `FixedSizeBinary(16)` array with UUID extension metadata into a Vortex
+/// `ExtensionArray` with UUID dtype.
+fn uuid_from_arrow_fixed_size_binary(
+    array: &dyn ArrowArray,
+    nullable: bool,
+) -> VortexResult<ArrayRef> {
+    let fsb = array
+        .as_any()
+        .downcast_ref::<arrow_array::FixedSizeBinaryArray>()
+        .vortex_expect("UUID column must be FixedSizeBinaryArray");
+
+    let nullability = if nullable {
+        Nullability::Nullable
+    } else {
+        Nullability::NonNullable
+    };
+
+    // Build the flat u8 element array from the underlying bytes.
+    let flat_bytes = fsb.value_data();
+    let elements = PrimitiveArray::new(
+        Buffer::from_arrow_buffer(
+            ArrowBuffer::from_slice_ref(flat_bytes),
+            Alignment::of::<u8>(),
+        ),
+        Validity::NonNullable,
+    )
+    .into_array();
+
+    let validity = nulls(fsb.nulls(), nullable);
+    let storage = FixedSizeListArray::try_new(elements, 16, validity, fsb.len())?.into_array();
+
+    let storage_dtype = DType::FixedSizeList(
+        Arc::new(DType::Primitive(PType::U8, Nullability::NonNullable)),
+        16,
+        nullability,
+    );
+    let ext_dtype = ExtDType::<Uuid>::try_new(UuidMetadata::default(), storage_dtype)?.erased();
+
+    Ok(ExtensionArray::new(ext_dtype, storage).into_array())
 }
 
 impl<O: IntegerPType + OffsetSizeTrait> FromArrowArray<&GenericListArray<O>> for ArrayRef {

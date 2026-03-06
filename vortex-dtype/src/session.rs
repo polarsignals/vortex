@@ -14,6 +14,7 @@ use crate::datetime::Time;
 use crate::datetime::Timestamp;
 use crate::extension::DynExtDTypeVTable;
 use crate::extension::ExtDTypeVTable;
+use crate::uuid::Uuid;
 
 /// Registry for extension dtypes.
 pub type ExtDTypeRegistry = Registry<Arc<dyn DynExtDTypeVTable>>;
@@ -34,6 +35,9 @@ impl Default for DTypeSession {
         this.register(Date);
         this.register(Time);
         this.register(Timestamp);
+
+        // Register UUID extension dtype
+        this.register(Uuid);
 
         this
     }

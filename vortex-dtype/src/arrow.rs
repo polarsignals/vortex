@@ -23,6 +23,7 @@ use arrow_schema::Schema;
 use arrow_schema::SchemaBuilder;
 use arrow_schema::SchemaRef;
 use arrow_schema::TimeUnit as ArrowTimeUnit;
+use arrow_schema::extension::ExtensionType as _;
 use vortex_error::VortexError;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
@@ -42,6 +43,9 @@ use crate::datetime::TemporalMetadata;
 use crate::datetime::Time;
 use crate::datetime::TimeUnit;
 use crate::datetime::Timestamp;
+use crate::extension::ExtDType;
+use crate::uuid::Uuid;
+use crate::uuid::UuidMetadata;
 
 /// Trait for converting Arrow types to Vortex types.
 pub trait FromArrowType<T>: Sized {
@@ -210,7 +214,23 @@ impl FromArrowType<(&DataType, Nullability)> for DType {
 
 impl FromArrowType<&Field> for DType {
     fn from_arrow(field: &Field) -> Self {
-        Self::from_arrow((field.data_type(), field.is_nullable().into()))
+        let nullability = Nullability::from(field.is_nullable());
+
+        // Check for Arrow UUID extension type.
+        if field.extension_type_name() == Some(arrow_schema::extension::Uuid::NAME) {
+            let storage_dtype = DType::FixedSizeList(
+                Arc::new(DType::Primitive(PType::U8, Nullability::NonNullable)),
+                16,
+                nullability,
+            );
+            return DType::Extension(
+                ExtDType::<Uuid>::try_new(UuidMetadata::default(), storage_dtype)
+                    .vortex_expect("valid UUID dtype")
+                    .erased(),
+            );
+        }
+
+        Self::from_arrow((field.data_type(), nullability))
     }
 }
 
@@ -227,11 +247,17 @@ impl DType {
 
         let mut builder = SchemaBuilder::with_capacity(struct_dtype.names().len());
         for (field_name, field_dtype) in struct_dtype.names().iter().zip(struct_dtype.fields()) {
-            builder.push(FieldRef::from(Field::new(
+            let mut field = Field::new(
                 field_name.as_ref(),
                 field_dtype.to_arrow_dtype()?,
                 field_dtype.is_nullable(),
-            )));
+            );
+            if let DType::Extension(ext) = field_dtype
+                && ext.is::<Uuid>()
+            {
+                field = field.with_extension_type(arrow_schema::extension::Uuid);
+            }
+            builder.push(FieldRef::from(field));
         }
 
         Ok(builder.finish())
@@ -325,6 +351,10 @@ impl DType {
                         },
                     });
                 };
+
+                if ext_dtype.is::<Uuid>() {
+                    return Ok(DataType::FixedSizeBinary(16));
+                }
 
                 vortex_bail!("Unsupported extension type \"{}\"", ext_dtype.id())
             }

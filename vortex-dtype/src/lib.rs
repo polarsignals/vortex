@@ -27,6 +27,7 @@ mod ptype;
 pub mod serde;
 pub mod session;
 mod struct_;
+pub mod uuid;
 
 pub use bigint::*;
 pub use decimal::*;

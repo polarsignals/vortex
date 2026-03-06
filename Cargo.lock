@@ -10012,6 +10012,7 @@ dependencies = [
  "tabled",
  "termtree",
  "tracing",
+ "uuid",
  "vortex-array",
  "vortex-buffer",
  "vortex-dtype",
@@ -10305,6 +10306,7 @@ dependencies = [
  "serde_json",
  "serde_test",
  "static_assertions",
+ "uuid",
  "vortex-buffer",
  "vortex-error",
  "vortex-flatbuffers",
@@ -10408,6 +10410,8 @@ dependencies = [
 name = "vortex-file"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
+ "arrow-schema",
  "async-trait",
  "bytes",
  "flatbuffers",

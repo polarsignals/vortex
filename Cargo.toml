@@ -93,7 +93,7 @@ arrow-cast = "57.1"
 arrow-data = "57.1"
 arrow-ipc = "57.1"
 arrow-ord = "57.1"
-arrow-schema = "57.1"
+arrow-schema = { version = "57.1", features = ["canonical_extension_types"] }
 arrow-select = "57.1"
 arrow-string = "57.1"
 async-fs = "2.2.0"
