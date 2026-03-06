@@ -29,6 +29,7 @@ use crate::session::ArraySession;
 use crate::vtable::DynVTable;
 
 pub mod accessor;
+pub mod aggregate_fn;
 #[doc(hidden)]
 pub mod aliases;
 mod array;
