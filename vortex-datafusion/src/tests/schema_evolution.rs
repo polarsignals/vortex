@@ -954,3 +954,69 @@ async fn test_sql_struct_field_dictionary_type(
 
     Ok(())
 }
+
+/// Test that UUID extension type schema information roundtrips correctly through DataFusion.
+#[rstest]
+#[tokio::test]
+async fn test_uuid_column_type_preservation(
+    #[values(false, true)] projection_pushdown: bool,
+) -> anyhow::Result<()> {
+    use arrow_schema::extension::ExtensionType;
+    use datafusion::arrow::array::FixedSizeBinaryArray;
+
+    let ctx = TestSessionContext::new(projection_pushdown);
+
+    let uuid1 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000")?;
+    let uuid2 = uuid::Uuid::parse_str("6ba7b810-9dad-11d1-80b4-00c04fd430c8")?;
+    let uuid3 = uuid::Uuid::parse_str("f47ac10b-58cc-4372-a567-0e02b2c3d479")?;
+
+    let uuid_values: Vec<Option<&[u8]>> = vec![
+        Some(uuid1.as_bytes()),
+        None,
+        Some(uuid2.as_bytes()),
+        Some(uuid3.as_bytes()),
+        None,
+    ];
+    let fsb_array = FixedSizeBinaryArray::from(uuid_values);
+
+    let field = Field::new("id", DataType::FixedSizeBinary(16), true)
+        .with_extension_type(arrow_schema::extension::Uuid);
+    let schema = Arc::new(Schema::new(vec![field]));
+    let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(fsb_array)])?;
+
+    ctx.write_arrow_batch("files/uuids.vortex", &batch).await?;
+
+    // Use table_provider with the explicit schema so the UUID extension type is preserved.
+    let provider = ctx
+        .table_provider("uuid_tbl", "/files/", schema.clone())
+        .await?;
+    let table = ctx.session.read_table(provider)?;
+
+    // Verify the table schema preserves the UUID extension type.
+    let table_schema = table.schema();
+    let id_field = table_schema.as_arrow().field(0);
+    assert_eq!(id_field.data_type(), &DataType::FixedSizeBinary(16));
+    assert_eq!(
+        id_field.extension_type_name(),
+        Some(arrow_schema::extension::Uuid::NAME),
+        "UUID extension type should be preserved in table schema"
+    );
+
+    // Query the data and verify it roundtrips.
+    let result = table.filter(col("id").is_not_null())?.collect().await?;
+
+    assert!(!result.is_empty(), "Expected results from query");
+    assert_eq!(result.iter().map(|b| b.num_rows()).sum::<usize>(), 3);
+
+    // Verify the result schema also preserves the UUID extension type.
+    let result_schema = result[0].schema();
+    let result_field = result_schema.field(0);
+    assert_eq!(result_field.data_type(), &DataType::FixedSizeBinary(16));
+    assert_eq!(
+        result_field.extension_type_name(),
+        Some(arrow_schema::extension::Uuid::NAME),
+        "UUID extension type should be preserved in result schema"
+    );
+
+    Ok(())
+}

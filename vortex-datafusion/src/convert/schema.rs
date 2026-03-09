@@ -175,6 +175,10 @@ fn calculate_physical_field_type(dtype: &DType, logical_type: &DataType) -> DFRe
                 ));
             }
         }
+        // FixedSizeBinary doesn't roundtrip through DType for extension types like UUID
+        // (UUID is stored as FixedSizeList(U8, 16) but maps to FixedSizeBinary(16) in Arrow).
+        DataType::FixedSizeBinary(_) => logical_type.clone(),
+
         // All other types roundtrip cleanly, use the DType's natural conversion
         _ => dtype
             .to_arrow_dtype()
