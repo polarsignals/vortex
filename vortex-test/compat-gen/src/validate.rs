@@ -3,8 +3,6 @@
 
 use std::path::PathBuf;
 
-use vortex_array::IntoArray;
-use vortex_array::arrays::ChunkedArray;
 use vortex_array::assert_arrays_eq;
 use vortex_buffer::ByteBuffer;
 use vortex_error::VortexResult;
@@ -13,7 +11,7 @@ use vortex_error::vortex_err;
 use vortex_utils::aliases::hash_map::HashMap;
 
 use crate::adapter;
-use crate::fixtures::Fixture;
+use crate::fixtures::ArrayFixture;
 use crate::fixtures::all_fixtures;
 use crate::manifest::Manifest;
 
@@ -31,7 +29,7 @@ pub fn validate_all(
     versions: &[String],
 ) -> VortexResult<Vec<VersionResult>> {
     let fixtures = all_fixtures();
-    let fixture_map: HashMap<&str, &dyn Fixture> =
+    let fixture_map: HashMap<&str, &dyn ArrayFixture> =
         fixtures.iter().map(|f| (f.name(), f.as_ref())).collect();
 
     let mut results = Vec::new();
@@ -45,7 +43,7 @@ pub fn validate_all(
 fn validate_version(
     source: &FixtureSource,
     version: &str,
-    fixture_map: &HashMap<&str, &dyn Fixture>,
+    fixture_map: &HashMap<&str, &dyn ArrayFixture>,
 ) -> VortexResult<VersionResult> {
     let manifest = source.fetch_manifest(version)?;
     let mut passed = 0;
@@ -64,7 +62,7 @@ fn validate_version(
 
         eprintln!("  checking {} from v{version}...", entry.name);
         let bytes = source.fetch_fixture(version, &entry.name)?;
-        match validate_one(bytes, *fixture) {
+        match validate(bytes, *fixture) {
             Ok(()) => passed += 1,
             Err(e) => {
                 eprintln!("  FAIL: {} from v{version}: {e}", entry.name);
@@ -81,16 +79,11 @@ fn validate_version(
     })
 }
 
-fn validate_one(bytes: ByteBuffer, fixture: &dyn Fixture) -> VortexResult<()> {
+fn validate(bytes: ByteBuffer, fixture: &dyn ArrayFixture) -> VortexResult<()> {
     let actual = adapter::read_file(bytes)?;
     let expected = fixture.build()?;
 
-    let actual_dtype = actual[0].dtype().clone();
-    let expected_dtype = expected[0].dtype().clone();
-    let actual_arr = ChunkedArray::try_new(actual, actual_dtype)?.into_array();
-    let expected_arr = ChunkedArray::try_new(expected, expected_dtype)?.into_array();
-
-    assert_arrays_eq!(actual_arr, expected_arr);
+    assert_arrays_eq!(actual, expected);
     Ok(())
 }
 
