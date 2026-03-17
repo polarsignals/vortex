@@ -27,6 +27,8 @@ use vortex_mask::Mask;
 use crate::ArrayRef;
 use crate::DynArray;
 use crate::IntoArray;
+use crate::LEGACY_SESSION;
+use crate::VortexSessionExecute;
 use crate::arrays::BoolArray;
 use crate::arrays::PrimitiveArray;
 use crate::builtins::ArrayBuiltins;
@@ -1009,10 +1011,12 @@ fn test_boolean_demorgan_consistency(array: &ArrayRef) {
 /// Aggregate operations on sliced arrays must produce correct results
 /// regardless of the underlying encoding's offset handling.
 fn test_slice_aggregate_consistency(array: &ArrayRef) {
+    use crate::aggregate_fn::fns::sum::sum;
     use crate::compute::min_max;
     use crate::compute::nan_count;
-    use crate::compute::sum;
     use crate::dtype::DType;
+
+    let mut ctx = LEGACY_SESSION.create_execution_ctx();
 
     let len = array.len();
     if len < 5 {
@@ -1051,7 +1055,9 @@ fn test_slice_aggregate_consistency(array: &ArrayRef) {
         return;
     }
 
-    if let (Ok(slice_sum), Ok(canonical_sum)) = (sum(&sliced), sum(&canonical_sliced)) {
+    if let (Ok(slice_sum), Ok(canonical_sum)) =
+        (sum(&sliced, &mut ctx), sum(&canonical_sliced, &mut ctx))
+    {
         // Compare sum scalars
         assert_eq!(
             slice_sum, canonical_sum,
