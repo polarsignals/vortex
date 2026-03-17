@@ -9901,6 +9901,8 @@ name = "vortex-compat"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
+ "arrow-select",
+ "bytes",
  "chrono",
  "clap",
  "futures",
@@ -9908,6 +9910,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tpchgen",
  "tpchgen-arrow",

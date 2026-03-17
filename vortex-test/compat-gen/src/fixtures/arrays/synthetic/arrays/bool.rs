@@ -11,11 +11,11 @@ use vortex_array::validity::Validity;
 use vortex_array::vtable::ArrayId;
 use vortex_error::VortexResult;
 
-use crate::fixtures::ArrayFixture;
+use crate::fixtures::FlatLayoutFixture;
 
 pub struct BooleansFixture;
 
-impl ArrayFixture for BooleansFixture {
+impl FlatLayoutFixture for BooleansFixture {
     fn name(&self) -> &str {
         "booleans.vortex"
     }
@@ -32,9 +32,18 @@ impl ArrayFixture for BooleansFixture {
         let bools = BoolArray::from_iter([true, false, true, true, false]);
         let nullable_bools =
             BoolArray::from_iter([Some(true), None, Some(false), None, Some(true)]);
+        let all_true = BoolArray::from_iter([true, true, true, true, true]);
+        let all_false = BoolArray::from_iter([false, false, false, false, false]);
+        let all_null: BoolArray = BoolArray::from_iter([None::<bool>, None, None, None, None]);
         let arr = StructArray::try_new(
-            FieldNames::from(["flag", "nullable_flag"]),
-            vec![bools.into_array(), nullable_bools.into_array()],
+            FieldNames::from(["flag", "nullable_flag", "all_true", "all_false", "all_null"]),
+            vec![
+                bools.into_array(),
+                nullable_bools.into_array(),
+                all_true.into_array(),
+                all_false.into_array(),
+                all_null.into_array(),
+            ],
             5,
             Validity::NonNullable,
         )?;

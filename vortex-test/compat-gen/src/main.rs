@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
+use std::fs;
 use std::path::PathBuf;
 
 use chrono::Utc;
 use clap::Parser;
 use vortex_compat::fixtures::all_fixtures;
-use vortex_compat::fixtures::check_expected_encodings;
-use vortex_compat::manifest::FixtureEntry;
 use vortex_compat::manifest::Manifest;
 use vortex_error::VortexResult;
 
@@ -43,24 +42,19 @@ fn main() -> VortexResult<()> {
             );
         }
     } else {
-        std::fs::create_dir_all(&cli.output)
+        fs::create_dir_all(&cli.output)
             .map_err(|e| vortex_error::vortex_err!("failed to create output dir: {e}"))?;
     }
 
     let fixtures = all_fixtures();
-    let mut entries = Vec::with_capacity(fixtures.len());
+    let mut entries = Vec::new();
 
     for fixture in &fixtures {
-        let array = fixture.build()?;
-        check_expected_encodings(&array, fixture.as_ref())?;
-        let path = cli.output.join(fixture.name());
-        vortex_compat::adapter::write_file(&path, array)?;
-
-        entries.push(FixtureEntry {
-            name: fixture.name().to_string(),
-            description: fixture.description().to_string(),
-        });
-        eprintln!("  wrote {}", fixture.name());
+        let new_entries = fixture.write(&cli.output)?;
+        for entry in &new_entries {
+            eprintln!("  generated file: {}", entry.name);
+        }
+        entries.extend(new_entries);
     }
 
     let manifest = Manifest {
@@ -71,10 +65,14 @@ fn main() -> VortexResult<()> {
     let manifest_path = cli.output.join("manifest.json");
     let manifest_json = serde_json::to_string_pretty(&manifest)
         .map_err(|e| vortex_error::vortex_err!("failed to serialize manifest: {e}"))?;
-    std::fs::write(&manifest_path, manifest_json)
+    fs::write(&manifest_path, manifest_json)
         .map_err(|e| vortex_error::vortex_err!("failed to write manifest: {e}"))?;
     eprintln!("  wrote manifest.json");
 
-    eprintln!("done: {} fixtures for v{}", fixtures.len(), cli.version);
+    eprintln!(
+        "done: {} fixtures for v{}",
+        manifest.fixtures.len(),
+        cli.version
+    );
     Ok(())
 }

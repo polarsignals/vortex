@@ -13,11 +13,11 @@ use vortex::encodings::bytebool::ByteBoolArray;
 use vortex::error::VortexResult;
 
 use super::N;
-use crate::fixtures::ArrayFixture;
+use crate::fixtures::FlatLayoutFixture;
 
 pub struct ByteBoolFixture;
 
-impl ArrayFixture for ByteBoolFixture {
+impl FlatLayoutFixture for ByteBoolFixture {
     fn name(&self) -> &str {
         "bytebool.vortex"
     }
@@ -38,6 +38,14 @@ impl ArrayFixture for ByteBoolFixture {
         let nullable_validity =
             Validity::from(BoolArray::from_iter((0..N).map(|i| i % 5 != 0)).to_bit_buffer());
         let all_false: Vec<bool> = vec![false; N];
+        let all_true: Vec<bool> = vec![true; N];
+        let all_null_vals: Vec<bool> = vec![false; N];
+        let single_flip: Vec<bool> = (0..N).map(|i| i != N / 2).collect();
+        let sparse_true: Vec<bool> = (0..N).map(|i| i % 127 == 0).collect();
+        let edge_null_vals: Vec<bool> = (0..N).map(|i| i % 4 == 0).collect();
+        let edge_null_validity = Validity::from(
+            BoolArray::from_iter((0..N).map(|i| (8..N - 8).contains(&i))).to_bit_buffer(),
+        );
 
         let arr = StructArray::try_new(
             FieldNames::from([
@@ -46,6 +54,11 @@ impl ArrayFixture for ByteBoolFixture {
                 "mixed",
                 "nullable_bool",
                 "all_false",
+                "all_true",
+                "all_null",
+                "single_flip",
+                "sparse_true",
+                "edge_nulls",
             ]),
             vec![
                 ByteBoolArray::from_vec(alternating, Validity::NonNullable).into_array(),
@@ -53,6 +66,11 @@ impl ArrayFixture for ByteBoolFixture {
                 ByteBoolArray::from_vec(mixed, Validity::NonNullable).into_array(),
                 ByteBoolArray::from_vec(nullable_vals, nullable_validity).into_array(),
                 ByteBoolArray::from_vec(all_false, Validity::NonNullable).into_array(),
+                ByteBoolArray::from_vec(all_true, Validity::NonNullable).into_array(),
+                ByteBoolArray::from_vec(all_null_vals, Validity::AllInvalid).into_array(),
+                ByteBoolArray::from_vec(single_flip, Validity::NonNullable).into_array(),
+                ByteBoolArray::from_vec(sparse_true, Validity::NonNullable).into_array(),
+                ByteBoolArray::from_vec(edge_null_vals, edge_null_validity).into_array(),
             ],
             N,
             Validity::NonNullable,

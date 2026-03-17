@@ -12,17 +12,17 @@ use vortex_array::validity::Validity;
 use vortex_array::vtable::ArrayId;
 use vortex_error::VortexResult;
 
-use crate::fixtures::ArrayFixture;
+use crate::fixtures::FlatLayoutFixture;
 
 pub struct ChunkedFixture;
 
-impl ArrayFixture for ChunkedFixture {
+impl FlatLayoutFixture for ChunkedFixture {
     fn name(&self) -> &str {
         "chunked.vortex"
     }
 
     fn description(&self) -> &str {
-        "ChunkedArray with 3 chunks of 1000 rows each containing deterministic u32 values"
+        "ChunkedArray with variable-size chunks containing nullable data"
     }
 
     fn expected_encodings(&self) -> Vec<ArrayId> {
@@ -30,22 +30,29 @@ impl ArrayFixture for ChunkedFixture {
     }
 
     fn build(&self) -> VortexResult<ArrayRef> {
-        let value_gen = |chunk_idx| {
-            let values: Vec<u32> = (0u32..1000).map(|i| chunk_idx * 1000 + i).collect();
-            let primitives =
-                PrimitiveArray::new(vortex_buffer::Buffer::from(values), Validity::NonNullable);
-            Ok(StructArray::try_new(
-                FieldNames::from(["id"]),
-                vec![primitives.into_array()],
-                1000,
-                Validity::NonNullable,
-            )?
-            .into_array())
-        };
+        // Variable chunk sizes: 500, 1000, 250
+        let chunk_sizes: [u32; 3] = [500, 1000, 250];
+        let mut offset = 0u32;
 
-        Ok(
-            ChunkedArray::from_iter((0u32..3).map(value_gen).collect::<VortexResult<Vec<_>>>()?)
-                .into_array(),
-        )
+        let chunks = chunk_sizes
+            .iter()
+            .map(|&size| {
+                let ids: PrimitiveArray = (offset..offset + size).collect();
+                let nullable_vals = PrimitiveArray::from_option_iter(
+                    (offset..offset + size)
+                        .map(|i| if i % 7 == 0 { None } else { Some(i as i64 * 3) }),
+                );
+                offset += size;
+                Ok(StructArray::try_new(
+                    FieldNames::from(["id", "nullable_val"]),
+                    vec![ids.into_array(), nullable_vals.into_array()],
+                    size as usize,
+                    Validity::NonNullable,
+                )?
+                .into_array())
+            })
+            .collect::<VortexResult<Vec<_>>>()?;
+
+        Ok(ChunkedArray::from_iter(chunks).into_array())
     }
 }

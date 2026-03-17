@@ -7,18 +7,21 @@
 
 mod bool;
 mod chunked;
+mod datetime;
+mod decimal;
 mod fixed_size_list;
 mod list;
+mod listview;
 mod null;
 mod primitive;
 mod struct_nested;
 mod varbin;
 mod varbinview;
 
-use crate::fixtures::ArrayFixture;
+use crate::fixtures::FlatLayoutFixture;
 
 /// All per-array-type fixtures.
-pub fn fixtures() -> Vec<Box<dyn ArrayFixture>> {
+pub fn fixtures() -> Vec<Box<dyn FlatLayoutFixture>> {
     vec![
         Box::new(primitive::PrimitivesFixture),
         Box::new(varbin::VarBinFixture),
@@ -29,5 +32,8 @@ pub fn fixtures() -> Vec<Box<dyn ArrayFixture>> {
         Box::new(list::ListFixture),
         Box::new(fixed_size_list::FixedSizeListFixture),
         Box::new(null::NullFixture),
+        Box::new(datetime::DateTimeFixture),
+        Box::new(decimal::DecimalFixture),
+        Box::new(listview::ListViewFixture),
     ]
 }
