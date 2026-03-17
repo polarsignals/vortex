@@ -3,8 +3,10 @@
 
 use num_traits::FromPrimitive;
 use vortex_buffer::BufferMut;
+use vortex_dtype::DType;
 use vortex_dtype::IntegerPType;
 use vortex_dtype::Nullability;
+use vortex_dtype::PType;
 use vortex_dtype::match_each_integer_ptype;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
@@ -14,6 +16,7 @@ use crate::IntoArray;
 use crate::ToCanonical;
 use crate::arrays::ListViewArray;
 use crate::builders::builder_with_capacity;
+use crate::builtins::ArrayBuiltins;
 use crate::compute;
 use crate::scalar::Scalar;
 use crate::vtable::ValidityHelper;
@@ -210,8 +213,22 @@ impl ListViewArray {
             let last_size = self.size_at(self.len() - 1);
             last_offset + last_size
         } else {
+            // Cast offsets and sizes to u64 before adding to avoid overflow in narrow
+            // types (e.g. offset=215u8 + size=46u8 = 261 overflows u8).
+            let u64_dtype = DType::Primitive(PType::U64, Nullability::NonNullable);
+            let wide_offsets = self
+                .offsets()
+                .clone()
+                .cast(u64_dtype.clone())
+                .vortex_expect("cast offsets to u64");
+            let wide_sizes = self
+                .sizes()
+                .clone()
+                .cast(u64_dtype)
+                .vortex_expect("cast sizes to u64");
+
             let min_max = compute::min_max(
-                &compute::add(self.offsets(), self.sizes())
+                &compute::add(&*wide_offsets, &*wide_sizes)
                     .vortex_expect("`offsets + sizes` somehow overflowed"),
             )
             .vortex_expect("Something went wrong while computing min and max")
@@ -445,6 +462,29 @@ mod tests {
         assert_arrays_eq!(
             exact.list_elements_at(1).unwrap(),
             PrimitiveArray::from_iter([3i32, 4])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_rebuild_trim_elements_narrow_offset_overflow() -> VortexResult<()> {
+        // Regression test for issue #6973: offset + size can overflow a narrow integer type
+        // (e.g. u8) even though both values individually fit.
+        // offset=215u8, size=46u8 => end=261 which overflows u8.
+        let elements = PrimitiveArray::from_iter(0..261i32).into_array();
+        let offsets = PrimitiveArray::from_iter(vec![215u8]).into_array();
+        let sizes = PrimitiveArray::from_iter(vec![46u8]).into_array();
+
+        let listview = ListViewArray::new(elements, offsets, sizes, Validity::NonNullable);
+
+        let trimmed = listview.rebuild(ListViewRebuildMode::TrimElements)?;
+
+        assert_eq!(trimmed.offset_at(0), 0);
+        assert_eq!(trimmed.size_at(0), 46);
+        assert_eq!(trimmed.elements().len(), 46);
+        assert_arrays_eq!(
+            trimmed.list_elements_at(0).unwrap(),
+            PrimitiveArray::from_iter(215..261i32)
         );
         Ok(())
     }
