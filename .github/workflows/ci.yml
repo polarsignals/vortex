@@ -846,6 +846,12 @@ jobs:
           enable-sccache: "false"
       - run: cargo build --package vortex-jni
 
+  compat-check:
+    name: "Compat check"
+    uses: ./.github/workflows/compat-validation.yml
+    with:
+      mode: last
+
   rust-publish-dry-run:
     name: "Rust publish dry-run"
     timeout-minutes: 40
