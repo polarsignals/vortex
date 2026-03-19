@@ -48,7 +48,7 @@ pub struct ProcessedProjection {
 }
 
 /// Tries to convert the expressions into a vortex conjunction. Will return Ok(None) iff the input conjunction is empty.
-pub(crate) fn make_vortex_predicate(
+pub fn make_vortex_predicate(
     expr_convertor: &dyn ExpressionConvertor,
     predicate: &[Arc<dyn PhysicalExpr>],
 ) -> DFResult<Option<Expression>> {
