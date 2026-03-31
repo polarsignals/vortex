@@ -10168,11 +10168,125 @@ impl core::default::Default for vortex_array::display::DisplayOptions
 
 pub fn vortex_array::display::DisplayOptions::default() -> Self
 
+pub struct vortex_array::display::BufferExtractor
+
+pub vortex_array::display::BufferExtractor::show_percent: bool
+
+impl vortex_array::display::TreeExtractor for vortex_array::display::BufferExtractor
+
+pub fn vortex_array::display::BufferExtractor::write_details(&self, array: &dyn vortex_array::DynArray, _ctx: &vortex_array::display::TreeContext, f: &mut vortex_array::display::IndentedFormatter<'_, '_>) -> core::fmt::Result
+
+pub fn vortex_array::display::BufferExtractor::write_header(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
 pub struct vortex_array::display::DisplayArrayAs<'a>(pub &'a dyn vortex_array::DynArray, pub vortex_array::display::DisplayOptions)
 
 impl core::fmt::Display for vortex_array::display::DisplayArrayAs<'_>
 
 pub fn vortex_array::display::DisplayArrayAs<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+pub struct vortex_array::display::EncodingSummaryExtractor
+
+impl vortex_array::display::EncodingSummaryExtractor
+
+pub fn vortex_array::display::EncodingSummaryExtractor::write(array: &dyn vortex_array::DynArray, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+impl vortex_array::display::TreeExtractor for vortex_array::display::EncodingSummaryExtractor
+
+pub fn vortex_array::display::EncodingSummaryExtractor::write_details(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut vortex_array::display::IndentedFormatter<'_, '_>) -> core::fmt::Result
+
+pub fn vortex_array::display::EncodingSummaryExtractor::write_header(&self, array: &dyn vortex_array::DynArray, _ctx: &vortex_array::display::TreeContext, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+pub struct vortex_array::display::IndentedFormatter<'a, 'b>
+
+impl<'a, 'b> vortex_array::display::IndentedFormatter<'a, 'b>
+
+pub fn vortex_array::display::IndentedFormatter<'a, 'b>::formatter(&mut self) -> &mut core::fmt::Formatter<'b>
+
+pub fn vortex_array::display::IndentedFormatter<'a, 'b>::indent(&self) -> &str
+
+pub fn vortex_array::display::IndentedFormatter<'a, 'b>::parts(&mut self) -> (&str, &mut core::fmt::Formatter<'b>)
+
+pub struct vortex_array::display::MetadataExtractor
+
+impl vortex_array::display::TreeExtractor for vortex_array::display::MetadataExtractor
+
+pub fn vortex_array::display::MetadataExtractor::write_details(&self, array: &dyn vortex_array::DynArray, _ctx: &vortex_array::display::TreeContext, f: &mut vortex_array::display::IndentedFormatter<'_, '_>) -> core::fmt::Result
+
+pub fn vortex_array::display::MetadataExtractor::write_header(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+pub struct vortex_array::display::NbytesExtractor
+
+impl vortex_array::display::TreeExtractor for vortex_array::display::NbytesExtractor
+
+pub fn vortex_array::display::NbytesExtractor::write_details(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut vortex_array::display::IndentedFormatter<'_, '_>) -> core::fmt::Result
+
+pub fn vortex_array::display::NbytesExtractor::write_header(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+pub struct vortex_array::display::StatsExtractor
+
+impl vortex_array::display::TreeExtractor for vortex_array::display::StatsExtractor
+
+pub fn vortex_array::display::StatsExtractor::write_details(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut vortex_array::display::IndentedFormatter<'_, '_>) -> core::fmt::Result
+
+pub fn vortex_array::display::StatsExtractor::write_header(&self, array: &dyn vortex_array::DynArray, _ctx: &vortex_array::display::TreeContext, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+pub struct vortex_array::display::TreeContext
+
+impl vortex_array::display::TreeContext
+
+pub fn vortex_array::display::TreeContext::parent_total_size(&self) -> core::option::Option<u64>
+
+pub struct vortex_array::display::TreeDisplay
+
+impl vortex_array::display::TreeDisplay
+
+pub fn vortex_array::display::TreeDisplay::default_display(array: vortex_array::ArrayRef) -> Self
+
+pub fn vortex_array::display::TreeDisplay::new(array: vortex_array::ArrayRef) -> Self
+
+pub fn vortex_array::display::TreeDisplay::with<E: vortex_array::display::TreeExtractor + 'static>(self, extractor: E) -> Self
+
+pub fn vortex_array::display::TreeDisplay::with_boxed(self, extractor: alloc::boxed::Box<dyn vortex_array::display::TreeExtractor>) -> Self
+
+impl core::fmt::Display for vortex_array::display::TreeDisplay
+
+pub fn vortex_array::display::TreeDisplay::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+pub trait vortex_array::display::TreeExtractor: core::marker::Send + core::marker::Sync
+
+pub fn vortex_array::display::TreeExtractor::write_details(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut vortex_array::display::IndentedFormatter<'_, '_>) -> core::fmt::Result
+
+pub fn vortex_array::display::TreeExtractor::write_header(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+impl vortex_array::display::TreeExtractor for vortex_array::display::BufferExtractor
+
+pub fn vortex_array::display::BufferExtractor::write_details(&self, array: &dyn vortex_array::DynArray, _ctx: &vortex_array::display::TreeContext, f: &mut vortex_array::display::IndentedFormatter<'_, '_>) -> core::fmt::Result
+
+pub fn vortex_array::display::BufferExtractor::write_header(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+impl vortex_array::display::TreeExtractor for vortex_array::display::EncodingSummaryExtractor
+
+pub fn vortex_array::display::EncodingSummaryExtractor::write_details(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut vortex_array::display::IndentedFormatter<'_, '_>) -> core::fmt::Result
+
+pub fn vortex_array::display::EncodingSummaryExtractor::write_header(&self, array: &dyn vortex_array::DynArray, _ctx: &vortex_array::display::TreeContext, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+impl vortex_array::display::TreeExtractor for vortex_array::display::MetadataExtractor
+
+pub fn vortex_array::display::MetadataExtractor::write_details(&self, array: &dyn vortex_array::DynArray, _ctx: &vortex_array::display::TreeContext, f: &mut vortex_array::display::IndentedFormatter<'_, '_>) -> core::fmt::Result
+
+pub fn vortex_array::display::MetadataExtractor::write_header(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+impl vortex_array::display::TreeExtractor for vortex_array::display::NbytesExtractor
+
+pub fn vortex_array::display::NbytesExtractor::write_details(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut vortex_array::display::IndentedFormatter<'_, '_>) -> core::fmt::Result
+
+pub fn vortex_array::display::NbytesExtractor::write_header(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+
+impl vortex_array::display::TreeExtractor for vortex_array::display::StatsExtractor
+
+pub fn vortex_array::display::StatsExtractor::write_details(&self, array: &dyn vortex_array::DynArray, ctx: &vortex_array::display::TreeContext, f: &mut vortex_array::display::IndentedFormatter<'_, '_>) -> core::fmt::Result
+
+pub fn vortex_array::display::StatsExtractor::write_header(&self, array: &dyn vortex_array::DynArray, _ctx: &vortex_array::display::TreeContext, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 
 pub mod vortex_array::dtype
 
