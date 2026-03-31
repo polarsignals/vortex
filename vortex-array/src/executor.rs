@@ -109,7 +109,7 @@ impl dyn DynArray + '_ {
             });
 
         let mut current = self.optimize()?;
-        // Stack frames: (parent, child_idx, done_predicate_for_child)
+        // Stack frames: (parent, slot_idx, done_predicate_for_slot)
         let mut stack: Vec<(ArrayRef, usize, DonePredicate)> = Vec::new();
 
         for _ in 0..*MAX_ITERATIONS {
@@ -123,8 +123,8 @@ impl dyn DynArray + '_ {
                         ctx.log(format_args!("-> {}", current));
                         return Ok(current);
                     }
-                    Some((parent, child_idx, _)) => {
-                        current = parent.with_child(child_idx, current)?;
+                    Some((parent, slot_idx, _)) => {
+                        current = parent.with_slot(slot_idx, current)?;
                         current = current.optimize()?;
                         continue;
                     }
@@ -139,8 +139,8 @@ impl dyn DynArray + '_ {
                         ctx.log(format_args!("-> canonical (unmatched) {}", current));
                         return Ok(current);
                     }
-                    Some((parent, child_idx, _)) => {
-                        current = parent.with_child(child_idx, current)?;
+                    Some((parent, slot_idx, _)) => {
+                        current = parent.with_slot(slot_idx, current)?;
                         current = current.optimize()?;
                         continue;
                     }
@@ -161,12 +161,12 @@ impl dyn DynArray + '_ {
             let result = execute_step(current, ctx)?;
             let (array, step) = result.into_parts();
             match step {
-                ExecutionStep::ExecuteChild(i, done) => {
-                    let child = array
-                        .nth_child(i)
-                        .vortex_expect("ExecuteChild index in bounds");
+                ExecutionStep::ExecuteSlot(i, done) => {
+                    let child = array.slots()[i]
+                        .clone()
+                        .vortex_expect("ExecuteSlot index in bounds");
                     ctx.log(format_args!(
-                        "ExecuteChild({i}): pushing {}, focusing on {}",
+                        "ExecuteSlot({i}): pushing {}, focusing on {}",
                         array, child
                     ));
                     stack.push((array, i, done));
@@ -287,12 +287,14 @@ impl Executable for ArrayRef {
         }
 
         // 2. reduce_parent (child-driven metadata-only rewrites)
-        for child_idx in 0..array.nchildren() {
-            let child = array.nth_child(child_idx).vortex_expect("checked length");
-            if let Some(reduced_parent) = child.vtable().reduce_parent(&child, &array, child_idx)? {
+        for (slot_idx, slot) in array.slots().iter().enumerate() {
+            let Some(child) = slot else {
+                continue;
+            };
+            if let Some(reduced_parent) = child.vtable().reduce_parent(child, &array, slot_idx)? {
                 ctx.log(format_args!(
-                    "reduce_parent: child[{}]({}) rewrote {} -> {}",
-                    child_idx,
+                    "reduce_parent: slot[{}]({}) rewrote {} -> {}",
+                    slot_idx,
                     child.encoding_id(),
                     array,
                     reduced_parent
@@ -303,16 +305,17 @@ impl Executable for ArrayRef {
         }
 
         // 3. execute_parent (child-driven optimized execution)
-        for child_idx in 0..array.nchildren() {
-            // TODO(joe): remove internal copy in nth_child.
-            let child = array.nth_child(child_idx).vortex_expect("checked length");
+        for (slot_idx, slot) in array.slots().iter().enumerate() {
+            let Some(child) = slot else {
+                continue;
+            };
             if let Some(executed_parent) = child
                 .vtable()
-                .execute_parent(&child, &array, child_idx, ctx)?
+                .execute_parent(child, &array, slot_idx, ctx)?
             {
                 ctx.log(format_args!(
-                    "execute_parent: child[{}]({}) rewrote {} -> {}",
-                    child_idx,
+                    "execute_parent: slot[{}]({}) rewrote {} -> {}",
+                    slot_idx,
                     child.encoding_id(),
                     array,
                     executed_parent
@@ -333,12 +336,12 @@ impl Executable for ArrayRef {
                 ctx.log(format_args!("-> {}", array.as_ref()));
                 Ok(array)
             }
-            ExecutionStep::ExecuteChild(i, _) => {
-                // For single-step execution, handle ExecuteChild by executing the child,
+            ExecutionStep::ExecuteSlot(i, _) => {
+                // For single-step execution, handle ExecuteSlot by executing the slot,
                 // replacing it, and returning the updated array.
-                let child = array.nth_child(i).vortex_expect("valid child index");
+                let child = array.slots()[i].clone().vortex_expect("valid slot index");
                 let executed_child = child.execute::<ArrayRef>(ctx)?;
-                array.with_child(i, executed_child)
+                array.with_slot(i, executed_child)
             }
         }
     }
@@ -352,16 +355,13 @@ fn execute_step(array: ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Executi
     vtable.execute(array, ctx)
 }
 
-/// Try execute_parent on each child of the array.
+/// Try execute_parent on each occupied slot of the array.
 fn try_execute_parent(array: &ArrayRef, ctx: &mut ExecutionCtx) -> VortexResult<Option<ArrayRef>> {
-    for child_idx in 0..array.nchildren() {
-        let child = array
-            .nth_child(child_idx)
-            .vortex_expect("checked nchildren");
-        if let Some(result) = child
-            .vtable()
-            .execute_parent(&child, array, child_idx, ctx)?
-        {
+    for (slot_idx, slot) in array.slots().iter().enumerate() {
+        let Some(child) = slot else {
+            continue;
+        };
+        if let Some(result) = child.vtable().execute_parent(child, array, slot_idx, ctx)? {
             result.statistics().inherit_from(array.statistics());
             return Ok(Some(result));
         }
@@ -378,13 +378,15 @@ pub type DonePredicate = fn(&dyn DynArray) -> bool;
 /// scheduler what to do next. This enables the scheduler to manage execution iteratively using
 /// an explicit work stack, run cross-step optimizations, and cache shared sub-expressions.
 pub enum ExecutionStep {
-    /// Request that the scheduler execute child at the given index, using the provided
-    /// [`DonePredicate`] to determine when the child is "done", then replace the child in this
+    /// Request that the scheduler execute the slot at the given index, using the provided
+    /// [`DonePredicate`] to determine when the slot is "done", then replace the slot in this
     /// array and re-enter execution.
     ///
     /// Between steps, the scheduler runs reduce/reduce_parent rules to fixpoint, enabling
     /// cross-step optimization (e.g., pushing scalar functions through newly-decoded children).
-    ExecuteChild(usize, DonePredicate),
+    ///
+    /// Use [`ExecutionResult::execute_slot`] instead of constructing this variant directly.
+    ExecuteSlot(usize, DonePredicate),
 
     /// Execution is complete. The array in the accompanying [`ExecutionResult`] is the result.
     /// The scheduler will continue executing if it has not yet reached the target form.
@@ -394,9 +396,7 @@ pub enum ExecutionStep {
 impl fmt::Debug for ExecutionStep {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ExecutionStep::ExecuteChild(idx, _) => {
-                f.debug_tuple("ExecuteChild").field(idx).finish()
-            }
+            ExecutionStep::ExecuteSlot(idx, _) => f.debug_tuple("ExecuteSlot").field(idx).finish(),
             ExecutionStep::Done => write!(f, "Done"),
         }
     }
@@ -420,13 +420,13 @@ impl ExecutionResult {
         }
     }
 
-    /// Request execution of child at `child_idx` until it matches the given [`Matcher`].
+    /// Request execution of slot at `slot_idx` until it matches the given [`Matcher`].
     ///
-    /// The provided array is the (possibly modified) parent that still needs its child executed.
-    pub fn execute_child<M: Matcher>(array: impl IntoArray, child_idx: usize) -> Self {
+    /// The provided array is the (possibly modified) parent that still needs its slot executed.
+    pub fn execute_slot<M: Matcher>(array: impl IntoArray, slot_idx: usize) -> Self {
         Self {
             array: array.into_array(),
-            step: ExecutionStep::ExecuteChild(child_idx, M::matches),
+            step: ExecutionStep::ExecuteSlot(slot_idx, M::matches),
         }
     }
 
@@ -467,7 +467,7 @@ impl fmt::Debug for ExecutionResult {
 macro_rules! require_child {
     ($parent:expr, $child:expr, $idx:expr => $M:ty) => {{
         if !$child.is::<$M>() {
-            return Ok($crate::ExecutionResult::execute_child::<$M>(
+            return Ok($crate::ExecutionResult::execute_slot::<$M>(
                 $parent.clone(),
                 $idx,
             ));
