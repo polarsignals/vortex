@@ -13,7 +13,6 @@ use vortex_array::arrays::ExtensionArray;
 use vortex_array::arrays::PrimitiveArray;
 use vortex_array::arrays::ScalarFnArray;
 use vortex_array::arrays::extension::ExtensionArrayExt;
-use vortex_array::builtins::ArrayBuiltins;
 use vortex_array::dtype::DType;
 use vortex_array::dtype::NativePType;
 use vortex_array::dtype::Nullability;
@@ -26,8 +25,10 @@ use vortex_array::scalar_fn::ScalarFn;
 use vortex_array::scalar_fn::ScalarFnId;
 use vortex_array::scalar_fn::ScalarFnVTable;
 use vortex_buffer::Buffer;
+use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
 use vortex_error::vortex_ensure;
+use vortex_error::vortex_ensure_eq;
 use vortex_error::vortex_err;
 
 use crate::encodings::turboquant::TurboQuant;
@@ -35,8 +36,6 @@ use crate::encodings::turboquant::TurboQuantArrayExt;
 use crate::matcher::AnyTensor;
 use crate::scalar_fns::ApproxOptions;
 use crate::utils::extract_flat_elements;
-use crate::utils::tensor_element_ptype;
-use crate::utils::tensor_list_size;
 
 /// L2 norm (Euclidean norm) of a tensor or vector column.
 ///
@@ -106,12 +105,10 @@ impl ScalarFnVTable for L2Norm {
             vortex_err!("L2Norm input must be an extension type, got {input_dtype}")
         })?;
 
-        vortex_ensure!(
-            ext.is::<AnyTensor>(),
-            "L2Norm input must be an `AnyTensor`, got {input_dtype}"
-        );
-
-        let ptype = tensor_element_ptype(ext)?;
+        let tensor_match = ext
+            .metadata_opt::<AnyTensor>()
+            .ok_or_else(|| vortex_err!("L2Norm input must be an `AnyTensor`, got {input_dtype}"))?;
+        let ptype = tensor_match.element_ptype();
         vortex_ensure!(
             ptype.is_float(),
             "L2Norm element dtype must be a float primitive, got {ptype}"
@@ -130,26 +127,32 @@ impl ScalarFnVTable for L2Norm {
         let input_ref = args.get(0)?;
         let row_count = args.row_count();
 
-        // TurboQuant stores exact precomputed norms -- no decompression needed.
-        // Norms are currently stored as f32; cast to the target dtype if needed
-        // (e.g., if the input extension has f64 elements).
+        let ext = input_ref.dtype().as_extension();
+        let tensor_match = ext
+            .metadata_opt::<AnyTensor>()
+            .vortex_expect("we already validated this in `return_dtype`");
+        let dimensions = tensor_match.list_size();
+        let element_ptype = tensor_match.element_ptype();
+
+        // TODO(connor): TQ might not store norms in the future.
+        // TurboQuant stores exact precomputed norms, so no decompression needed.
         if let Some(tq) = input_ref.as_opt::<TurboQuant>() {
-            let ext = input_ref.dtype().as_extension();
-            let target_ptype = tensor_element_ptype(ext)?;
             let norms: PrimitiveArray = tq.norms().clone().execute(ctx)?;
-            let target_dtype = DType::Primitive(target_ptype, input_ref.dtype().nullability());
-            return norms.into_array().cast(target_dtype);
+
+            // Assert that the norms dtype has the correct output dtype and nullability.
+            vortex_ensure_eq!(
+                norms.dtype(),
+                &DType::Primitive(element_ptype, input_ref.dtype().nullability(),)
+            );
+
+            return Ok(norms.into_array());
         }
 
         let input: ExtensionArray = input_ref.execute(ctx)?;
         let validity = input.as_ref().validity()?;
 
-        // Get element ptype and list size from the dtype (validated by `return_dtype`).
-        let ext = input.dtype().as_extension();
-        let list_size = tensor_list_size(ext)? as usize;
-
         let storage = input.storage_array();
-        let flat = extract_flat_elements(storage, list_size, ctx)?;
+        let flat = extract_flat_elements(storage, dimensions, ctx)?;
 
         match_each_float_ptype!(flat.ptype(), |T| {
             let buffer: Buffer<T> = (0..row_count)
