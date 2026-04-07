@@ -37,8 +37,8 @@ use vortex_array::serde::ArrayChildren;
 use vortex_array::validity::Validity;
 use vortex_array::vtable;
 use vortex_array::vtable::VTable;
-use vortex_array::vtable::ValidityChild;
-use vortex_array::vtable::ValidityVTableFromChild;
+use vortex_array::vtable::ValidityVTable;
+use vortex_array::vtable::child_to_validity;
 use vortex_array::vtable::validity_to_child;
 use vortex_buffer::Buffer;
 use vortex_buffer::ByteBuffer;
@@ -98,7 +98,7 @@ impl ArrayEq for FSSTData {
 impl VTable for FSST {
     type ArrayData = FSSTData;
     type OperationsVTable = Self;
-    type ValidityVTable = ValidityVTableFromChild;
+    type ValidityVTable = Self;
 
     fn id(&self) -> ArrayId {
         Self::ID
@@ -319,9 +319,8 @@ pub(crate) const SLOT_NAMES: [&str; NUM_SLOTS] =
 pub struct FSSTData {
     symbols: Buffer<Symbol>,
     symbol_lengths: Buffer<u8>,
+    // TODO(joe): this was broken by a previous pr. This will not be updated if a slot is replaced.
     codes: VarBinArray,
-    /// NOTE(ngates): this === codes, but is stored as an ArrayRef so we can return &ArrayRef!
-    codes_array: ArrayRef,
 
     /// Memoized compressor used for push-down of compute by compressing the RHS.
     compressor: Arc<LazyLock<Compressor, Box<dyn Fn() -> Compressor + Send>>>,
@@ -505,13 +504,10 @@ impl FSSTData {
             Compressor::rebuild_from(symbols2.as_slice(), symbol_lengths2.as_slice())
         })
             as Box<dyn Fn() -> Compressor + Send>));
-        let codes_array = codes.clone().into_array();
-
         Self {
             symbols,
             symbol_lengths,
             codes,
-            codes_array,
             compressor,
         }
     }
@@ -577,9 +573,12 @@ pub trait FSSTArrayExt: TypedArrayRef<FSST> {
 
 impl<T: TypedArrayRef<FSST>> FSSTArrayExt for T {}
 
-impl ValidityChild<FSST> for FSST {
-    fn validity_child(array: ArrayView<'_, FSST>) -> ArrayRef {
-        array.codes_array.clone()
+impl ValidityVTable<FSST> for FSST {
+    fn validity(array: ArrayView<'_, FSST>) -> VortexResult<Validity> {
+        Ok(child_to_validity(
+            &array.slots()[CODES_VALIDITY_SLOT],
+            array.dtype().nullability(),
+        ))
     }
 }
 
