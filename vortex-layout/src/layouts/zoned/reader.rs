@@ -407,6 +407,7 @@ mod test {
     use vortex_array::expr::root;
     use vortex_buffer::buffer;
     use vortex_io::runtime::single::block_on;
+    use vortex_io::session::RuntimeSessionExt;
     use vortex_mask::Mask;
 
     use crate::LayoutRef;
@@ -443,14 +444,12 @@ mod test {
         .into_array()
         .to_array_stream()
         .sequenced(ptr);
-        let layout = block_on(|handle| {
-            strategy.write_stream(
-                ctx,
-                Arc::<TestSegments>::clone(&segments),
-                array_stream,
-                eof,
-                handle,
-            )
+        let segments2 = Arc::<TestSegments>::clone(&segments);
+        let layout = block_on(|handle| async move {
+            let session = SESSION.clone().with_handle(handle);
+            strategy
+                .write_stream(ctx, segments2, array_stream, eof, &session)
+                .await
         })
         .unwrap();
         (segments, layout)
