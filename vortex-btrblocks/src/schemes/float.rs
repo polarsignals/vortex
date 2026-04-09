@@ -13,7 +13,11 @@ use vortex_alp::alp_encode;
 use vortex_array::ArrayRef;
 use vortex_array::Canonical;
 use vortex_array::IntoArray;
+use vortex_array::LEGACY_SESSION;
 use vortex_array::ToCanonical;
+use vortex_array::VortexSessionExecute;
+use vortex_array::arrays::Patched;
+use vortex_array::arrays::patched::USE_EXPERIMENTAL_PATCHES;
 use vortex_array::arrays::primitive::PrimitiveArrayExt;
 use vortex_array::dtype::PType;
 use vortex_compressor::estimate::CompressionEstimate;
@@ -107,11 +111,30 @@ impl Scheme for ALPScheme {
         let compressed_alp_ints =
             compressor.compress_child(alp_encoded.encoded(), &ctx, self.id(), 0)?;
 
-        // Patches are not compressed. They should be infrequent, and if they are not then we want
-        // to keep them linear for easy indexing.
-        let patches = alp_encoded.patches().map(compress_patches).transpose()?;
+        let alp_stats = alp_encoded.as_array().statistics().to_owned();
+        let exponents = alp_encoded.exponents();
 
-        Ok(ALP::new(compressed_alp_ints, alp_encoded.exponents(), patches).into_array())
+        if *USE_EXPERIMENTAL_PATCHES {
+            let patches = alp_encoded.patches();
+
+            // Create ALP array without interior patches.
+            let alp_array = ALP::new(compressed_alp_ints, exponents, None).into_array();
+
+            match patches {
+                None => Ok(alp_array),
+                Some(p) => Ok(Patched::from_array_and_patches(
+                    alp_array,
+                    &p,
+                    &mut LEGACY_SESSION.create_execution_ctx(),
+                )?
+                .with_stats_set(alp_stats)
+                .into_array()),
+            }
+        } else {
+            let patches = alp_encoded.patches().map(compress_patches).transpose()?;
+
+            Ok(ALP::new(compressed_alp_ints, exponents, patches).into_array())
+        }
     }
 }
 
