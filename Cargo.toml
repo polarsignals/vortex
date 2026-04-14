@@ -163,6 +163,7 @@ itertools = "0.14.0"
 jetscii = "0.5.3"
 jiff = "0.2.0"
 kanal = "0.1.1"
+lasso = { version = "0.7", features = ["multi-threaded"] }
 lending-iterator = "0.1.7"
 libfuzzer-sys = "0.4"
 libloading = "0.8"

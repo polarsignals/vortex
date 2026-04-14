@@ -762,8 +762,8 @@ mod tests {
 
         let ser = SerializedArray::from_array_tree(tree).unwrap();
         let ctx = ReadContext::new([
-            ArrayId::new_ref("vortex.test.foreign_array"),
-            ArrayId::new_ref("vortex.test.foreign_child"),
+            ArrayId::new("vortex.test.foreign_array"),
+            ArrayId::new("vortex.test.foreign_child"),
         ]);
         let session = VortexSession::empty()
             .with::<ArraySession>()

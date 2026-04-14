@@ -360,7 +360,7 @@ mod tests {
                 )],
                 Nullability::NonNullable,
             );
-            assert!(layout.encoding_id() == LayoutId::new_ref("vortex.dict"));
+            assert!(layout.encoding_id() == LayoutId::new("vortex.dict"));
             let actual = layout
                 .new_reader("".into(), segments, &session)
                 .unwrap()
@@ -504,7 +504,7 @@ mod tests {
                 .unwrap();
 
             let expression = is_not_null(root());
-            assert_eq!(layout.encoding_id(), LayoutId::new_ref("vortex.dict"));
+            assert_eq!(layout.encoding_id(), LayoutId::new("vortex.dict"));
             let actual = layout
                 .new_reader("".into(), segments, &session)
                 .unwrap()
