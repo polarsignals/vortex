@@ -258,7 +258,10 @@ pub(crate) fn number_type_from_ptype(ptype: PType) -> NumberType {
 }
 
 fn collect_valid(parray: ArrayView<'_, Primitive>) -> VortexResult<PrimitiveArray> {
-    let mask = parray.array().validity_mask()?;
+    let mask = parray.array().validity()?.to_mask(
+        parray.array().len(),
+        &mut LEGACY_SESSION.create_execution_ctx(),
+    )?;
     Ok(parray.array().filter(mask)?.to_primitive())
 }
 

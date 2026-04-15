@@ -13,6 +13,7 @@ use vortex_error::vortex_ensure;
 use vortex_mask::Mask;
 
 use crate::ArrayRef;
+use crate::ExecutionCtx;
 use crate::IntoArray;
 use crate::array::Array;
 use crate::array::ArrayParts;
@@ -92,10 +93,6 @@ pub trait BoolArrayExt: TypedArrayRef<Bool> {
         child_to_validity(&self.as_ref().slots()[VALIDITY_SLOT], self.nullability())
     }
 
-    fn bool_validity_mask(&self) -> Mask {
-        self.validity().to_mask(self.as_ref().len())
-    }
-
     fn to_bit_buffer(&self) -> BitBuffer {
         let buffer = self.bits.as_host().clone();
         BitBuffer::new_with_offset(buffer, self.as_ref().len(), self.offset)
@@ -116,8 +113,11 @@ pub trait BoolArrayExt: TypedArrayRef<Bool> {
             .vortex_expect("cannot convert nullable boolean array to mask")
     }
 
-    fn to_mask_fill_null_false(&self) -> Mask {
-        let validity_mask = self.bool_validity_mask();
+    fn to_mask_fill_null_false(&self, ctx: &mut ExecutionCtx) -> Mask {
+        let validity_mask = self
+            .validity()
+            .to_mask(self.as_ref().len(), ctx)
+            .vortex_expect("Failed to compute validity mask");
         let buffer = match validity_mask {
             Mask::AllTrue(_) => self.to_bit_buffer(),
             Mask::AllFalse(_) => return Mask::new_false(self.as_ref().len()),

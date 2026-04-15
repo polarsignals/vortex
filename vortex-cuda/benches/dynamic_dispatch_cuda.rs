@@ -18,7 +18,9 @@ use cudarc::driver::LaunchConfig;
 use cudarc::driver::PushKernelArg;
 use cudarc::driver::sys::CUevent_flags;
 use vortex::array::IntoArray;
+use vortex::array::LEGACY_SESSION;
 use vortex::array::ToCanonical;
+use vortex::array::VortexSessionExecute;
 use vortex::array::arrays::DictArray;
 use vortex::array::arrays::PrimitiveArray;
 use vortex::array::scalar::Scalar;
@@ -373,7 +375,12 @@ fn bench_alp_for_bitpacked(c: &mut Criterion) {
         let float_prim = PrimitiveArray::new(Buffer::from(floats), NonNullable);
 
         // Encode: ALP → FoR → BitPacked
-        let alp = alp_encode(float_prim.as_view(), Some(exponents)).vortex_expect("alp_encode");
+        let alp = alp_encode(
+            float_prim.as_view(),
+            Some(exponents),
+            &mut LEGACY_SESSION.create_execution_ctx(),
+        )
+        .vortex_expect("alp_encode");
         assert!(alp.patches().is_none());
         let for_arr = FoRData::encode(alp.encoded().to_primitive()).vortex_expect("for encode");
         let bp =

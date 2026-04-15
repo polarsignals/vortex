@@ -288,10 +288,6 @@ pub trait ListArrayExt: TypedArrayRef<List> {
         child_to_validity(&self.as_ref().slots()[VALIDITY_SLOT], self.nullability())
     }
 
-    fn list_validity_mask(&self) -> vortex_mask::Mask {
-        self.list_validity().to_mask(self.as_ref().len())
-    }
-
     fn offset_at(&self, index: usize) -> VortexResult<usize> {
         vortex_ensure!(
             index <= self.as_ref().len(),

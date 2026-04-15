@@ -20,7 +20,9 @@ use vortex_mask::Mask;
 
 use crate::ArrayRef;
 use crate::Canonical;
+use crate::LEGACY_SESSION;
 use crate::ToCanonical;
+use crate::VortexSessionExecute;
 use crate::array::IntoArray;
 use crate::arrays::ListViewArray;
 use crate::arrays::PrimitiveArray;
@@ -303,8 +305,13 @@ impl<O: IntegerPType, S: IntegerPType> ArrayBuilder for ListViewBuilder<O, S> {
             .vortex_expect("ListViewArray::rebuild(MakeExact) failed in extend_from_array");
         debug_assert!(listview.is_zero_copy_to_list());
 
-        self.nulls
-            .append_validity_mask(listview.listview_validity_mask());
+        self.nulls.append_validity_mask(
+            array
+                .validity()
+                .vortex_expect("validity_mask in extend_from_array_unchecked")
+                .to_mask(array.len(), &mut LEGACY_SESSION.create_execution_ctx())
+                .vortex_expect("Failed to compute validity mask"),
+        );
 
         // Bulk append the new elements (which should have no gaps or overlaps).
         let old_elements_len = self.elements_builder.len();

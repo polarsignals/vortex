@@ -35,7 +35,6 @@ use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
 use vortex_error::vortex_ensure;
 use vortex_error::vortex_panic;
-use vortex_mask::Mask;
 use vortex_session::VortexSession;
 use vortex_session::registry::CachedId;
 
@@ -189,10 +188,6 @@ pub trait ByteBoolArrayExt: TypedArrayRef<ByteBool> {
             &self.as_ref().slots()[VALIDITY_SLOT],
             self.as_ref().dtype().nullability(),
         )
-    }
-
-    fn validity_mask(&self) -> Mask {
-        self.validity().to_mask(self.as_ref().len())
     }
 }
 

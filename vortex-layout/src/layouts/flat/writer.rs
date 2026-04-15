@@ -199,8 +199,10 @@ mod tests {
     use vortex_array::ArrayContext;
     use vortex_array::ArrayRef;
     use vortex_array::IntoArray;
+    use vortex_array::LEGACY_SESSION;
     use vortex_array::MaskFuture;
     use vortex_array::ToCanonical;
+    use vortex_array::VortexSessionExecute;
     use vortex_array::arrays::BoolArray;
     use vortex_array::arrays::Dict;
     use vortex_array::arrays::DictArray;
@@ -393,7 +395,12 @@ mod tests {
                 .unwrap();
 
             assert_eq!(
-                result.validity_mask().unwrap().bit_buffer(),
+                result
+                    .validity()
+                    .unwrap()
+                    .to_mask(result.len(), &mut LEGACY_SESSION.create_execution_ctx())
+                    .unwrap()
+                    .bit_buffer(),
                 AllOr::Some(&validity_boolean_buffer)
             );
             assert_eq!(

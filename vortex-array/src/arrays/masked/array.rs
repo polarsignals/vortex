@@ -50,10 +50,6 @@ pub trait MaskedArrayExt: TypedArrayRef<Masked> {
             self.as_ref().dtype().nullability(),
         )
     }
-
-    fn masked_validity_mask(&self) -> vortex_mask::Mask {
-        self.masked_validity().to_mask(self.as_ref().len())
-    }
 }
 impl<T: TypedArrayRef<Masked>> MaskedArrayExt for T {}
 

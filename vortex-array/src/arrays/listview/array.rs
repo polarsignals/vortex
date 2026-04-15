@@ -334,10 +334,6 @@ pub trait ListViewArrayExt: TypedArrayRef<ListView> {
         child_to_validity(&self.as_ref().slots()[VALIDITY_SLOT], self.nullability())
     }
 
-    fn listview_validity_mask(&self) -> vortex_mask::Mask {
-        self.listview_validity().to_mask(self.as_ref().len())
-    }
-
     fn offset_at(&self, index: usize) -> usize {
         assert!(
             index < self.as_ref().len(),
