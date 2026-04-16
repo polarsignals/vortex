@@ -31,7 +31,8 @@ use crate::ArrayRef;
 use crate::IntoArray;
 use crate::LEGACY_SESSION;
 use crate::RecursiveCanonical;
-use crate::ToCanonical;
+#[expect(deprecated)]
+use crate::ToCanonical as _;
 use crate::VortexSessionExecute;
 use crate::arrays::ConstantArray;
 use crate::builtins::ArrayBuiltins;
@@ -92,6 +93,7 @@ fn test_standard_binary_numeric<T: NativePType + Num + Copy>(array: ArrayRef)
 where
     Scalar: From<T>,
 {
+    #[expect(deprecated)]
     let canonicalized_array = array.to_primitive();
     let original_values = to_vec_of_scalar(&canonicalized_array.into_array());
 
@@ -328,6 +330,7 @@ where
     T: NativePType + Num + Copy + std::fmt::Debug,
     Scalar: From<T>,
 {
+    #[expect(deprecated)]
     let canonicalized_array = array.to_primitive();
     let original_values = to_vec_of_scalar(&canonicalized_array.into_array());
 

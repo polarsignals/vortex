@@ -290,6 +290,7 @@ mod tests {
     use std::sync::Arc;
 
     use vortex::array::IntoArray;
+    #[expect(deprecated)]
     use vortex::array::ToCanonical;
     use vortex::array::arrays::BoolArray;
     use vortex::array::arrays::ListArray;
@@ -357,7 +358,9 @@ mod tests {
             {
                 let applied_array = vx_array::as_ref(applied_array);
                 let expected: Buffer<u8> = ages_array.to_buffer();
-                assert_eq!(applied_array.to_primitive().to_buffer(), expected);
+                #[expect(deprecated)]
+                let prim = applied_array.to_primitive();
+                assert_eq!(prim.to_buffer(), expected);
             }
             vx_array_free(applied_array);
 
@@ -461,6 +464,7 @@ mod tests {
             assert!(error.is_null());
             assert!(!applied_array.is_null());
             {
+                #[expect(deprecated)]
                 let array = vx_array::as_ref(applied_array).to_bool();
                 let expected = BoolArray::from_iter([false, false, true, false]);
                 assert_eq!(array.to_bit_buffer(), expected.to_bit_buffer());
@@ -474,6 +478,7 @@ mod tests {
             assert!(error.is_null());
             assert!(!applied_array.is_null());
             {
+                #[expect(deprecated)]
                 let array = vx_array::as_ref(applied_array).to_bool();
                 let expected = BoolArray::from_iter([true, true, true, false]);
                 assert_eq!(array.to_bit_buffer(), expected.to_bit_buffer());
@@ -528,6 +533,7 @@ mod tests {
             assert!(error.is_null());
             assert!(!applied.is_null());
             {
+                #[expect(deprecated)]
                 let applied = vx_array::as_ref(applied).to_bool();
                 let expected = BoolArray::from_iter([true, false, false]);
                 assert_eq!(applied.to_bit_buffer(), expected.to_bit_buffer());

@@ -23,7 +23,8 @@ use crate::builders::DEFAULT_BUILDER_CAPACITY;
 use crate::builders::LazyBitBufferBuilder;
 use crate::builders::PrimitiveBuilder;
 use crate::builders::builder_with_capacity;
-use crate::canonical::ToCanonical;
+#[expect(deprecated)]
+use crate::canonical::ToCanonical as _;
 use crate::dtype::DType;
 use crate::dtype::IntegerPType;
 use crate::dtype::Nullability;
@@ -217,6 +218,7 @@ impl<O: IntegerPType> ArrayBuilder for ListBuilder<O> {
     }
 
     unsafe fn extend_from_array_unchecked(&mut self, array: &ArrayRef) {
+        #[expect(deprecated)]
         let list = array.to_listview();
         if list.is_empty() {
             return;
@@ -233,7 +235,9 @@ impl<O: IntegerPType> ArrayBuilder for ListBuilder<O> {
 
         // Note that `ListViewArray` has `n` offsets and sizes, not `n+1` offsets like `ListArray`.
         let elements = list.elements();
+        #[expect(deprecated)]
         let offsets = list.offsets().to_primitive();
+        #[expect(deprecated)]
         let sizes = list.sizes().to_primitive();
 
         fn extend_inner<O, OffsetType, SizeType>(
@@ -305,7 +309,9 @@ impl<O: IntegerPType> ArrayBuilder for ListBuilder<O> {
     }
 
     fn finish_into_canonical(&mut self) -> Canonical {
-        Canonical::List(self.finish_into_list().into_array().to_listview())
+        #[expect(deprecated)]
+        let listview = self.finish_into_list().into_array().to_listview();
+        Canonical::List(listview)
     }
 }
 
@@ -320,7 +326,8 @@ mod tests {
 
     use crate::IntoArray;
     use crate::LEGACY_SESSION;
-    use crate::ToCanonical;
+    #[expect(deprecated)]
+    use crate::ToCanonical as _;
     use crate::arrays::ChunkedArray;
     use crate::arrays::PrimitiveArray;
     use crate::arrays::list::ListArrayExt;
@@ -376,6 +383,7 @@ mod tests {
         let list = builder.finish();
         assert_eq!(list.len(), 2);
 
+        #[expect(deprecated)]
         let list_array = list.to_listview();
 
         assert_eq!(list_array.list_elements_at(0).unwrap().len(), 3);
@@ -428,6 +436,7 @@ mod tests {
         let list = builder.finish();
         assert_eq!(list.len(), 3);
 
+        #[expect(deprecated)]
         let list_array = list.to_listview();
 
         assert_eq!(list_array.list_elements_at(0).unwrap().len(), 3);
@@ -451,6 +460,7 @@ mod tests {
         builder.extend_from_array(&list.slice(0..0).unwrap());
         builder.extend_from_array(&list.slice(1..3).unwrap());
 
+        #[expect(deprecated)]
         let expected = ListArray::from_iter_opt_slow::<O, _, _>(
             [
                 Some(vec![0, 1, 2]),
@@ -524,6 +534,7 @@ mod tests {
             DType::List(Arc::new(DType::Primitive(I32, NonNullable)), NonNullable),
         );
 
+        #[expect(deprecated)]
         let canon_values = chunked_list.unwrap().as_array().to_listview();
 
         assert_eq!(

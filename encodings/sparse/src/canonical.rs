@@ -566,6 +566,7 @@ mod test {
     use vortex_array::Canonical;
     use vortex_array::IntoArray;
     use vortex_array::LEGACY_SESSION;
+    #[expect(deprecated)]
     use vortex_array::ToCanonical;
     use vortex_array::VortexSessionExecute;
     use vortex_array::arrays::BoolArray;
@@ -607,6 +608,7 @@ mod test {
         let indices = buffer![0u64, 1, 7].into_array();
         let values = BoolArray::from_iter([Some(true), None, Some(false)]).into_array();
         let sparse_bools = Sparse::try_new(indices, values, 10, Scalar::from(fill_value)).unwrap();
+        #[expect(deprecated)]
         let actual = sparse_bools.as_array().to_bool();
 
         let expected = BoolArray::from_iter([
@@ -635,6 +637,7 @@ mod test {
         let sparse_ints = Sparse::try_new(indices, values, 10, Scalar::from(fill_value)).unwrap();
         assert_eq!(*sparse_ints.dtype(), DType::Primitive(PType::I32, Nullable));
 
+        #[expect(deprecated)]
         let flat_ints = sparse_ints.as_array().to_primitive();
         let expected = PrimitiveArray::from_option_iter([
             Some(0i32),
@@ -718,6 +721,7 @@ mod test {
         .unwrap()
         .into_array();
 
+        #[expect(deprecated)]
         let actual = sparse_struct.as_array().to_struct();
         assert_arrays_eq!(actual, expected);
     }
@@ -785,6 +789,7 @@ mod test {
         .unwrap()
         .into_array();
 
+        #[expect(deprecated)]
         let actual = sparse_struct.as_array().to_struct();
         assert_arrays_eq!(actual, expected);
     }
@@ -813,6 +818,7 @@ mod test {
         .into_arrow_preferred()
         .unwrap();
 
+        #[expect(deprecated)]
         let actual = sparse_struct
             .as_array()
             .to_decimal()
@@ -845,6 +851,7 @@ mod test {
         )
         .unwrap();
 
+        #[expect(deprecated)]
         let actual = array.as_array().to_varbinview().into_array();
         let expected = <VarBinViewArray as FromIterator<_>>::from_iter([
             Some("hello"),
@@ -886,6 +893,7 @@ mod test {
         )
         .unwrap();
 
+        #[expect(deprecated)]
         let actual = array.as_array().to_varbinview().into_array();
         let expected = <VarBinViewArray as FromIterator<_>>::from_iter([
             Some("hello"),
@@ -920,6 +928,7 @@ mod test {
         )
         .unwrap();
 
+        #[expect(deprecated)]
         let actual = array.as_array().to_varbinview().into_array();
         let expected = VarBinViewArray::from_iter_str([
             "hello", "123", "123", "goodbye", "hello", "bonjour", "123", "123", "你好",
@@ -950,6 +959,7 @@ mod test {
         )
         .unwrap();
 
+        #[expect(deprecated)]
         let actual = array.as_array().to_varbinview().into_array();
         let expected = <VarBinViewArray as FromIterator<_>>::from_iter([
             Some("hello"),
@@ -991,6 +1001,7 @@ mod test {
         )
         .unwrap();
 
+        #[expect(deprecated)]
         let actual = array.as_array().to_varbinview().into_array();
         let expected = VarBinViewArray::from_iter_nullable_bin([
             Some(b"hello" as &[u8]),
@@ -1037,6 +1048,7 @@ mod test {
         let actual = sparse
             .execute::<Canonical>(&mut LEGACY_SESSION.create_execution_ctx())?
             .into_array();
+        #[expect(deprecated)]
         let result_listview = actual.to_listview();
 
         // Check the structure
@@ -1051,6 +1063,7 @@ mod test {
         assert_eq!(result_listview.size_at(5), 1); // [2]
 
         // Verify actual values
+        #[expect(deprecated)]
         let elements_array = result_listview.elements().to_primitive();
         let elements_slice = elements_array.as_slice::<i32>();
 
@@ -1094,6 +1107,7 @@ mod test {
             .execute::<Canonical>(&mut LEGACY_SESSION.create_execution_ctx())
             .vortex_expect("no fail")
             .into_array();
+        #[expect(deprecated)]
         let result_listview = actual.to_listview();
 
         // Check the structure
@@ -1108,6 +1122,7 @@ mod test {
         assert_eq!(result_listview.size_at(5), 1); // [2] - extra element beyond original slice
 
         // Verify actual values
+        #[expect(deprecated)]
         let elements_array = result_listview.elements().to_primitive();
         let elements_slice = elements_array.as_slice::<i32>();
 
@@ -1139,6 +1154,7 @@ mod test {
         let actual = sparse
             .execute::<Canonical>(&mut LEGACY_SESSION.create_execution_ctx())?
             .into_array();
+        #[expect(deprecated)]
         let result_listview = actual.to_listview();
 
         // Check the structure
@@ -1153,6 +1169,7 @@ mod test {
         assert_eq!(result_listview.size_at(5), 1); // [2] from sparse
 
         // Verify actual values
+        #[expect(deprecated)]
         let elements_array = result_listview.elements().to_primitive();
         let elements_slice = elements_array.as_slice::<i32>();
 
@@ -1211,6 +1228,7 @@ mod test {
         )
         .unwrap();
 
+        #[expect(deprecated)]
         let actual = array.as_array().to_varbinview().into_array();
         let expected = VarBinViewArray::from_iter_nullable_bin([
             Some(b"hello" as &[u8]),
@@ -1479,8 +1497,10 @@ mod test {
         .unwrap()
         .into_array();
 
+        #[expect(deprecated)]
+        let actual_listview = actual.to_listview();
         assert_eq!(
-            actual.to_listview().offsets().dtype(),
+            actual_listview.offsets().dtype(),
             &DType::Primitive(PType::U16, NonNullable)
         );
         assert_arrays_eq!(&actual, &expected);
@@ -1539,6 +1559,7 @@ mod test {
             .into_array()
             .execute::<Canonical>(&mut LEGACY_SESSION.create_execution_ctx())?
             .into_array();
+        #[expect(deprecated)]
         let result_listview = canonical.to_listview();
 
         // Verify the structure
@@ -1551,6 +1572,7 @@ mod test {
             if size == 0 {
                 vec![] // null/empty list
             } else {
+                #[expect(deprecated)]
                 let elements = result_listview.elements().to_primitive();
                 let slice = elements.as_slice::<i32>();
                 slice[offset..offset + size].to_vec()
@@ -1621,6 +1643,7 @@ mod test {
             .into_array()
             .execute::<Canonical>(&mut LEGACY_SESSION.create_execution_ctx())?
             .into_array();
+        #[expect(deprecated)]
         let result_listview = canonical.to_listview();
 
         assert_eq!(result_listview.len(), 5);
@@ -1632,6 +1655,7 @@ mod test {
             if size == 0 {
                 vec![] // null/empty list
             } else {
+                #[expect(deprecated)]
                 let elements = result_listview.elements().to_primitive();
                 let slice = elements.as_slice::<i32>();
                 slice[offset..offset + size].to_vec()

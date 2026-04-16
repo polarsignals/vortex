@@ -579,7 +579,8 @@ impl ArrayRef {
             }
             #[cfg(feature = "table-display")]
             DisplayOptions::TableDisplay => {
-                use crate::canonical::ToCanonical;
+                #[expect(deprecated)]
+                use crate::canonical::ToCanonical as _;
                 use crate::dtype::DType;
 
                 let mut builder = tabled::builder::Builder::default();
@@ -600,6 +601,7 @@ impl ArrayRef {
                     return write!(f, "{table}");
                 };
 
+                #[expect(deprecated)]
                 let struct_ = self.to_struct();
                 builder.push_record(sf.names().iter().map(|name| name.to_string()));
 

@@ -9,6 +9,7 @@ use super::*;
 use crate::Canonical;
 use crate::IntoArray;
 use crate::LEGACY_SESSION;
+#[expect(deprecated)]
 use crate::ToCanonical as _;
 use crate::VortexSessionExecute;
 use crate::arrays::PrimitiveArray;
@@ -62,6 +63,7 @@ fn test_masked_child_with_validity() {
     let array =
         MaskedArray::try_new(child, Validity::from_iter([true, false, true, false, true])).unwrap();
 
+    #[expect(deprecated)]
     let prim = array.as_array().to_primitive();
 
     // Positions where validity is false should be null in masked_child.

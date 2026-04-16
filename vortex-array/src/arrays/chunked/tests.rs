@@ -19,7 +19,8 @@ use crate::arrays::VarBinViewArray;
 use crate::arrays::chunked::ChunkedArrayExt;
 use crate::arrays::struct_::StructArrayExt;
 use crate::assert_arrays_eq;
-use crate::canonical::ToCanonical;
+#[expect(deprecated)]
+use crate::canonical::ToCanonical as _;
 use crate::dtype::DType;
 use crate::dtype::Nullability;
 use crate::dtype::PType;
@@ -190,8 +191,11 @@ pub fn pack_nested_structs() {
     )
     .unwrap()
     .into_array();
+    #[expect(deprecated)]
     let canonical_struct = chunked.to_struct();
+    #[expect(deprecated)]
     let canonical_varbin = canonical_struct.unmasked_fields()[0].to_varbinview();
+    #[expect(deprecated)]
     let original_varbin = struct_array.unmasked_fields()[0].to_varbinview();
     let orig_values =
         original_varbin.with_iterator(|it| it.map(|a| a.map(|v| v.to_vec())).collect::<Vec<_>>());
@@ -224,6 +228,7 @@ pub fn pack_nested_lists() {
         ),
     );
 
+    #[expect(deprecated)]
     let canon_values = chunked_list.unwrap().as_array().to_listview();
 
     assert_eq!(

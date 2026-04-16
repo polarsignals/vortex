@@ -330,7 +330,8 @@ mod tests {
     use super::*;
     use crate::IntoArray;
     use crate::LEGACY_SESSION;
-    use crate::ToCanonical;
+    #[expect(deprecated)]
+    use crate::ToCanonical as _;
     use crate::VortexSessionExecute;
     use crate::arrays::BoolArray;
     use crate::arrays::DecimalArray;
@@ -387,6 +388,7 @@ mod tests {
         let array = buffer![1, 0, 1, 0, 1].into_array();
         let upper = buffer![2, 1, 1, 0, 0].into_array();
 
+        #[expect(deprecated)]
         let matches = between_canonical(
             &array,
             &lower,
@@ -416,6 +418,7 @@ mod tests {
         )
         .into_array();
 
+        #[expect(deprecated)]
         let matches = between_canonical(
             &array,
             &lower,
@@ -434,6 +437,7 @@ mod tests {
 
         // upper is a fixed constant
         let upper = ConstantArray::new(Scalar::from(2), 5).into_array();
+        #[expect(deprecated)]
         let matches = between_canonical(
             &array,
             &lower,
@@ -452,6 +456,7 @@ mod tests {
         // lower is also a constant
         let lower = ConstantArray::new(Scalar::from(0), 5).into_array();
 
+        #[expect(deprecated)]
         let matches = between_canonical(
             &array,
             &lower,

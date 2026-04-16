@@ -237,6 +237,7 @@ where
 
     // Get canonical arrays using both methods.
     let canonical_direct = builder1.finish_into_canonical();
+    #[expect(deprecated)]
     let canonical_indirect = builder2
         .finish()
         .to_canonical()

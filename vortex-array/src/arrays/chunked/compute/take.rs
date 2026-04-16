@@ -126,7 +126,8 @@ mod test {
     use vortex_error::VortexResult;
 
     use crate::IntoArray;
-    use crate::ToCanonical;
+    #[expect(deprecated)]
+    use crate::ToCanonical as _;
     use crate::arrays::BoolArray;
     use crate::arrays::ChunkedArray;
     use crate::arrays::PrimitiveArray;
@@ -284,6 +285,7 @@ mod test {
         let result = arr.take(indices_arr.into_array())?;
 
         // Verify every element.
+        #[expect(deprecated)]
         let result = result.to_primitive();
         let result_vals = result.as_slice::<i32>();
         for (pos, &idx) in indices.iter().enumerate() {

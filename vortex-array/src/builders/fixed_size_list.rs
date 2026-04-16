@@ -22,7 +22,8 @@ use crate::builders::DEFAULT_BUILDER_CAPACITY;
 use crate::builders::LazyBitBufferBuilder;
 use crate::builders::builder_with_capacity;
 use crate::canonical::Canonical;
-use crate::canonical::ToCanonical;
+#[expect(deprecated)]
+use crate::canonical::ToCanonical as _;
 use crate::dtype::DType;
 use crate::dtype::Nullability;
 use crate::scalar::ListScalar;
@@ -237,6 +238,7 @@ impl ArrayBuilder for FixedSizeListBuilder {
     /// This will increase the capacity if extending with this `array` would go past the original
     /// capacity.
     unsafe fn extend_from_array_unchecked(&mut self, array: &ArrayRef) {
+        #[expect(deprecated)]
         let fsl = array.to_fixed_size_list();
         if fsl.is_empty() {
             return;
@@ -282,7 +284,8 @@ mod tests {
     use super::FixedSizeListBuilder;
     use crate::IntoArray as _;
     use crate::LEGACY_SESSION;
-    use crate::ToCanonical;
+    #[expect(deprecated)]
+    use crate::ToCanonical as _;
     use crate::VortexSessionExecute;
     use crate::arrays::PrimitiveArray;
     use crate::arrays::fixed_size_list::FixedSizeListArrayExt;
@@ -335,6 +338,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 2);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.elements().len(), 6);
         assert_eq!(fsl_array.list_size(), 3);
@@ -358,6 +362,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 100);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.list_size(), 0);
         // The elements array should be empty since list_size is 0.
@@ -387,6 +392,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 100);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.list_size(), 0);
         assert_eq!(fsl_array.elements().len(), 0);
@@ -416,6 +422,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 5);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.elements().len(), 10);
     }
@@ -429,6 +436,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 0);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.list_size(), 100000000);
         assert_eq!(fsl_array.elements().len(), 0);
@@ -461,6 +469,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 3);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert!(
             fsl_array
@@ -524,6 +533,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 2);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.elements().len(), 6);
     }
@@ -538,11 +548,13 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 5);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.list_size(), 3);
         assert_eq!(fsl_array.elements().len(), 15);
 
         // Check that all elements are zeros.
+        #[expect(deprecated)]
         let elements_array = fsl_array.elements().to_primitive();
         let elements = elements_array.as_slice::<i32>();
         assert!(elements.iter().all(|&x| x == 0));
@@ -561,6 +573,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 3);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.list_size(), 2);
 
@@ -591,6 +604,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 1);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.list_size(), 2);
 
@@ -616,6 +630,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 1000);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.list_size(), 0);
         assert_eq!(fsl_array.elements().len(), 0);
@@ -667,6 +682,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 6);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.elements().len(), 12);
 
@@ -742,6 +758,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 5);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.list_size(), 0);
         assert_eq!(fsl_array.elements().len(), 0);
@@ -854,6 +871,7 @@ mod tests {
         let fsl = builder.finish();
         assert_eq!(fsl.len(), 6);
 
+        #[expect(deprecated)]
         let fsl_array = fsl.to_fixed_size_list();
         assert_eq!(fsl_array.elements().len(), 12);
 
@@ -1017,6 +1035,7 @@ mod tests {
         assert_eq!(fsl.list_size(), 3);
 
         // Verify elements array: [1, 2, 3, 10, 11, 12, 4, 5, 6, 20, 21, 22].
+        #[expect(deprecated)]
         let elements = fsl.elements().to_primitive();
         assert_eq!(
             elements.as_slice::<i32>(),

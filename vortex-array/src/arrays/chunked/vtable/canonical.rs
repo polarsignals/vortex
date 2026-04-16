@@ -220,7 +220,8 @@ mod tests {
     use crate::ExecutionCtx;
     use crate::IntoArray;
     use crate::LEGACY_SESSION;
-    use crate::ToCanonical;
+    #[expect(deprecated)]
+    use crate::ToCanonical as _;
     use crate::VortexSessionExecute;
     use crate::accessor::ArrayAccessor;
     use crate::arrays::ChunkedArray;
@@ -274,8 +275,11 @@ mod tests {
         )
         .unwrap()
         .into_array();
+        #[expect(deprecated)]
         let canonical_struct = chunked.to_struct();
+        #[expect(deprecated)]
         let canonical_varbin = canonical_struct.unmasked_field(0).to_varbinview();
+        #[expect(deprecated)]
         let original_varbin = struct_array.unmasked_field(0).to_varbinview();
         let orig_values = original_varbin
             .with_iterator(|it| it.map(|a| a.map(|v| v.to_vec())).collect::<Vec<_>>());
@@ -305,6 +309,7 @@ mod tests {
             List(Arc::new(Primitive(I32, NonNullable)), NonNullable),
         );
 
+        #[expect(deprecated)]
         let canon_values = chunked_list.unwrap().as_array().to_listview();
 
         assert_eq!(

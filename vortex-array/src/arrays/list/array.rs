@@ -327,7 +327,9 @@ pub trait ListArrayExt: TypedArrayRef<List> {
     fn reset_offsets(&self, recurse: bool) -> VortexResult<Array<List>> {
         let mut elements = self.sliced_elements()?;
         if recurse && elements.is_canonical() {
-            elements = elements.to_canonical()?.compact()?.into_array();
+            #[expect(deprecated)]
+            let compacted = elements.to_canonical()?.compact()?.into_array();
+            elements = compacted;
         } else if recurse && let Some(child_list_array) = elements.as_opt::<List>() {
             elements = child_list_array
                 .into_owned()

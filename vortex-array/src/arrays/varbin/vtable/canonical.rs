@@ -53,7 +53,8 @@ mod tests {
     use crate::arrays::VarBinViewArray;
     use crate::arrays::varbin::builder::VarBinBuilder;
     use crate::assert_arrays_eq;
-    use crate::canonical::ToCanonical;
+    #[expect(deprecated)]
+    use crate::canonical::ToCanonical as _;
     use crate::dtype::DType;
     use crate::dtype::Nullability;
 
@@ -72,6 +73,7 @@ mod tests {
 
         let varbin = varbin.slice(1..4).unwrap();
 
+        #[expect(deprecated)]
         let canonical = varbin.to_varbinview();
         assert_eq!(canonical.dtype(), &dtype);
 
@@ -95,6 +97,7 @@ mod tests {
     #[case(DType::Binary(Nullability::NonNullable))]
     fn test_canonical_varbin_unsliced(#[case] dtype: DType) {
         let varbin = VarBinArray::from_iter_nonnull(["foo", "bar", "baz"], dtype.clone());
+        #[expect(deprecated)]
         let canonical = varbin.as_array().to_varbinview();
         let expected = match dtype {
             DType::Utf8(_) => VarBinViewArray::from_iter_str(["foo", "bar", "baz"]),
@@ -108,6 +111,7 @@ mod tests {
     fn test_canonical_varbin_empty() {
         let varbin =
             VarBinArray::from_iter_nonnull([] as [&str; 0], DType::Utf8(Nullability::NonNullable));
+        #[expect(deprecated)]
         let canonical = varbin.as_array().to_varbinview();
         assert_eq!(canonical.len(), 0);
     }

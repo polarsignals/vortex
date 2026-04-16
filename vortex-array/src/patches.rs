@@ -22,7 +22,8 @@ use crate::ArrayRef;
 use crate::ExecutionCtx;
 use crate::IntoArray;
 use crate::LEGACY_SESSION;
-use crate::ToCanonical;
+#[expect(deprecated)]
+use crate::ToCanonical as _;
 use crate::VortexSessionExecute;
 use crate::arrays::PrimitiveArray;
 use crate::builtins::ArrayBuiltins;
@@ -407,6 +408,7 @@ impl Patches {
     /// with the insertion point if not found.
     fn search_index_binary_search(indices: &ArrayRef, needle: usize) -> VortexResult<SearchResult> {
         if indices.is_canonical() {
+            #[expect(deprecated)]
             let primitive = indices.to_primitive();
             match_each_integer_ptype!(primitive.ptype(), |T| {
                 let Ok(needle) = T::try_from(needle) else {
@@ -1115,7 +1117,8 @@ mod test {
 
     use crate::IntoArray;
     use crate::LEGACY_SESSION;
-    use crate::ToCanonical;
+    #[expect(deprecated)]
+    use crate::ToCanonical as _;
     use crate::VortexSessionExecute;
     use crate::assert_arrays_eq;
     use crate::patches::Patches;
@@ -1165,7 +1168,9 @@ mod test {
             )
             .unwrap()
             .unwrap();
+        #[expect(deprecated)]
         let primitive_values = taken.values().to_primitive();
+        #[expect(deprecated)]
         let primitive_indices = taken.indices().to_primitive();
         assert_eq!(taken.array_len(), 2);
         assert_arrays_eq!(
@@ -1207,6 +1212,7 @@ mod test {
             .unwrap()
             .unwrap();
 
+        #[expect(deprecated)]
         let primitive_values = taken.values().to_primitive();
         assert_eq!(taken.array_len(), 2);
         assert_arrays_eq!(
@@ -1499,6 +1505,7 @@ mod test {
         assert_arrays_eq!(masked.indices(), PrimitiveArray::from_iter([5u64, 8]));
 
         // Values should be the null and 300
+        #[expect(deprecated)]
         let masked_values = masked.values().to_primitive();
         assert_eq!(masked_values.len(), 2);
         assert!(
@@ -1674,6 +1681,7 @@ mod test {
         )
         .unwrap();
 
+        #[expect(deprecated)]
         let values = patches.values().to_primitive();
         assert_eq!(
             i32::try_from(

@@ -214,7 +214,8 @@ mod tests {
     use crate::accessor::ArrayAccessor;
     use crate::arrays::VarBinViewArray;
     use crate::builtins::ArrayBuiltins;
-    use crate::canonical::ToCanonical;
+    #[expect(deprecated)]
+    use crate::canonical::ToCanonical as _;
     use crate::dtype::DType;
     use crate::dtype::Nullability;
 
@@ -246,6 +247,7 @@ mod tests {
 
         let mask = Mask::from_iter([true, false, true, false, false, true]);
 
+        #[expect(deprecated)]
         let zipped = mask
             .clone()
             .into_array()

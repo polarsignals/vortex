@@ -192,14 +192,14 @@ impl Array<Chunked> {
                 || new_chunk_n_elements + n_elements > target_rowsize)
                 && !chunks_to_combine.is_empty()
             {
-                new_chunks.push(
-                    unsafe {
-                        Array::<Chunked>::new_unchecked(chunks_to_combine, self.dtype().clone())
-                    }
-                    .into_array()
-                    .to_canonical()?
-                    .into_array(),
-                );
+                #[expect(deprecated)]
+                let canonical = unsafe {
+                    Array::<Chunked>::new_unchecked(chunks_to_combine, self.dtype().clone())
+                }
+                .into_array()
+                .to_canonical()?
+                .into_array();
+                new_chunks.push(canonical);
 
                 new_chunk_n_bytes = 0;
                 new_chunk_n_elements = 0;
@@ -216,12 +216,13 @@ impl Array<Chunked> {
         }
 
         if !chunks_to_combine.is_empty() {
-            new_chunks.push(
+            #[expect(deprecated)]
+            let canonical =
                 unsafe { Array::<Chunked>::new_unchecked(chunks_to_combine, self.dtype().clone()) }
                     .into_array()
                     .to_canonical()?
-                    .into_array(),
-            );
+                    .into_array();
+            new_chunks.push(canonical);
         }
 
         unsafe { Ok(Self::new_unchecked(new_chunks, self.dtype().clone())) }

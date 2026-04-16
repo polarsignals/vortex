@@ -146,7 +146,8 @@ mod test {
 
     use crate::IntoArray;
     use crate::LEGACY_SESSION;
-    use crate::ToCanonical;
+    #[expect(deprecated)]
+    use crate::ToCanonical as _;
     use crate::VortexSessionExecute;
     use crate::arrays::ConstantArray;
     use crate::arrays::VarBinArray;
@@ -164,6 +165,7 @@ mod test {
             [Some(b"abc".to_vec()), None, Some(b"def".to_vec())],
             DType::Binary(Nullability::Nullable),
         );
+        #[expect(deprecated)]
         let result = array
             .into_array()
             .binary(
@@ -206,6 +208,7 @@ mod test {
             [None, None, Some(b"def".to_vec())],
             DType::Binary(Nullability::Nullable),
         );
+        #[expect(deprecated)]
         let result = array
             .into_array()
             .binary(vbv.into_array(), Operator::Eq)

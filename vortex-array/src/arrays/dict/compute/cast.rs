@@ -57,7 +57,8 @@ mod tests {
     use vortex_buffer::buffer;
 
     use crate::IntoArray;
-    use crate::ToCanonical;
+    #[expect(deprecated)]
+    use crate::ToCanonical as _;
     use crate::arrays::Dict;
     use crate::arrays::PrimitiveArray;
     use crate::arrays::dict::DictArraySlotsExt;
@@ -83,6 +84,7 @@ mod tests {
             &DType::Primitive(PType::I64, Nullability::NonNullable)
         );
 
+        #[expect(deprecated)]
         let decoded = casted.to_primitive();
         assert_arrays_eq!(decoded, PrimitiveArray::from_iter([1i64, 2, 3, 2, 1]));
     }
@@ -168,7 +170,9 @@ mod tests {
         );
 
         // Verify values are unchanged
+        #[expect(deprecated)]
         let original_values = dict.as_array().to_primitive();
+        #[expect(deprecated)]
         let final_values = back_to_non_nullable.to_primitive();
         assert_arrays_eq!(original_values, final_values);
     }
@@ -217,9 +221,8 @@ mod tests {
             casted.dtype(),
             &DType::Primitive(PType::F64, Nullability::NonNullable)
         );
-        assert_arrays_eq!(
-            casted.to_primitive(),
-            PrimitiveArray::from_iter([1.0f64, 3.0, 1.0])
-        );
+        #[expect(deprecated)]
+        let casted_prim = casted.to_primitive();
+        assert_arrays_eq!(casted_prim, PrimitiveArray::from_iter([1.0f64, 3.0, 1.0]));
     }
 }

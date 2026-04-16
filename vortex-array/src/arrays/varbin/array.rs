@@ -13,7 +13,8 @@ use vortex_error::vortex_err;
 
 use crate::ArrayRef;
 use crate::LEGACY_SESSION;
-use crate::ToCanonical;
+#[expect(deprecated)]
+use crate::ToCanonical as _;
 use crate::VortexSessionExecute;
 use crate::array::Array;
 use crate::array::ArrayParts;
@@ -245,6 +246,7 @@ impl VarBinData {
             && matches!(dtype, DType::Utf8(_))
             && let Some(bytes) = bytes.as_host_opt()
         {
+            #[expect(deprecated)]
             let primitive_offsets = offsets.to_primitive();
             match_each_integer_ptype!(primitive_offsets.dtype().as_ptype(), |O| {
                 let offsets_slice = primitive_offsets.as_slice::<O>();

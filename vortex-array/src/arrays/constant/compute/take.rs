@@ -72,7 +72,8 @@ mod tests {
 
     use crate::IntoArray;
     use crate::LEGACY_SESSION;
-    use crate::ToCanonical;
+    #[expect(deprecated)]
+    use crate::ToCanonical as _;
     use crate::VortexSessionExecute;
     use crate::arrays::ConstantArray;
     use crate::arrays::PrimitiveArray;
@@ -100,6 +101,7 @@ mod tests {
             taken.dtype()
         );
         assert_arrays_eq!(
+            #[expect(deprecated)]
             taken.to_primitive(),
             PrimitiveArray::new(
                 buffer![42i32, 42, 42],
@@ -128,6 +130,7 @@ mod tests {
             taken.dtype()
         );
         assert_arrays_eq!(
+            #[expect(deprecated)]
             taken.to_primitive(),
             PrimitiveArray::new(buffer![42i32, 42, 42], Validity::AllValid)
         );

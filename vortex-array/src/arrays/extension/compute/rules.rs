@@ -56,7 +56,8 @@ mod tests {
     use vortex_mask::Mask;
 
     use crate::IntoArray;
-    use crate::ToCanonical;
+    #[expect(deprecated)]
+    use crate::ToCanonical as _;
     use crate::arrays::ConstantArray;
     use crate::arrays::Extension;
     use crate::arrays::ExtensionArray;
@@ -143,7 +144,9 @@ mod tests {
         assert_eq!(ext_result.ext_dtype(), &ext_dtype);
 
         // Check the storage values
-        let storage_result: &[i64] = &ext_result.storage_array().to_primitive().to_buffer::<i64>();
+        #[expect(deprecated)]
+        let storage_prim = ext_result.storage_array().to_primitive();
+        let storage_result: &[i64] = &storage_prim.to_buffer::<i64>();
         assert_eq!(storage_result, &[1, 3, 5]);
     }
 
@@ -169,6 +172,7 @@ mod tests {
         assert_eq!(ext_result.len(), 3);
 
         // Check values: should be [Some(1), None, None]
+        #[expect(deprecated)]
         let canonical = ext_result.storage_array().to_primitive();
         assert_eq!(canonical.len(), 3);
     }

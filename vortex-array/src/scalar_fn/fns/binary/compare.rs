@@ -250,7 +250,8 @@ mod tests {
     use crate::ArrayRef;
     use crate::IntoArray;
     use crate::LEGACY_SESSION;
-    use crate::ToCanonical;
+    #[expect(deprecated)]
+    use crate::ToCanonical as _;
     use crate::VortexSessionExecute;
     use crate::arrays::BoolArray;
     use crate::arrays::ListArray;
@@ -286,6 +287,7 @@ mod tests {
             Validity::from_iter([false, true, true, true, true]),
         );
 
+        #[expect(deprecated)]
         let matches = arr
             .clone()
             .into_array()
@@ -294,6 +296,7 @@ mod tests {
             .to_bool();
         assert_eq!(to_int_indices(matches).unwrap(), [1u64, 2, 3, 4]);
 
+        #[expect(deprecated)]
         let matches = arr
             .clone()
             .into_array()
@@ -308,6 +311,7 @@ mod tests {
             Validity::from_iter([false, true, true, true, true]),
         );
 
+        #[expect(deprecated)]
         let matches = arr
             .clone()
             .into_array()
@@ -316,6 +320,7 @@ mod tests {
             .to_bool();
         assert_eq!(to_int_indices(matches).unwrap(), [2u64, 3, 4]);
 
+        #[expect(deprecated)]
         let matches = arr
             .clone()
             .into_array()
@@ -324,6 +329,7 @@ mod tests {
             .to_bool();
         assert_eq!(to_int_indices(matches).unwrap(), [4u64]);
 
+        #[expect(deprecated)]
         let matches = other
             .clone()
             .into_array()
@@ -332,6 +338,7 @@ mod tests {
             .to_bool();
         assert_eq!(to_int_indices(matches).unwrap(), [2u64, 3, 4]);
 
+        #[expect(deprecated)]
         let matches = other
             .into_array()
             .binary(arr.into_array(), Operator::Gt)

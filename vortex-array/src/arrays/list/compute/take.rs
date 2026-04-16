@@ -200,7 +200,8 @@ mod test {
 
     use crate::IntoArray as _;
     use crate::LEGACY_SESSION;
-    use crate::ToCanonical;
+    #[expect(deprecated)]
+    use crate::ToCanonical as _;
     use crate::VortexSessionExecute;
     use crate::arrays::BoolArray;
     use crate::arrays::ListArray;
@@ -235,6 +236,7 @@ mod test {
             )
         );
 
+        #[expect(deprecated)]
         let result = result.to_listview();
 
         assert_eq!(result.len(), 4);
@@ -337,6 +339,7 @@ mod test {
             )
         );
 
+        #[expect(deprecated)]
         let result = result.to_listview();
 
         assert_eq!(result.len(), 3);
@@ -467,6 +470,7 @@ mod test {
 
         assert_eq!(result.len(), 2);
 
+        #[expect(deprecated)]
         let result_view = result.to_listview();
         assert_eq!(result_view.len(), 2);
         assert!(
@@ -496,6 +500,7 @@ mod test {
 
         assert_eq!(result.len(), 3);
 
+        #[expect(deprecated)]
         let result_view = result.to_listview();
         assert_eq!(result_view.len(), 3);
         assert!(
