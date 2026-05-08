@@ -20,6 +20,7 @@ use vortex_mask::Mask;
 use vortex_utils::aliases::hash_map::HashMap;
 
 use crate::ArrayRef;
+use crate::ArraySlots;
 use crate::ExecutionCtx;
 use crate::IntoArray;
 use crate::LEGACY_SESSION;
@@ -182,7 +183,7 @@ impl PatchesData {
     /// Push 3 patch slots (indices, values, chunk_offsets) onto a slot vector.
     ///
     /// If `patches` is `None`, pushes three `None` entries.
-    pub fn push_slots(slots: &mut Vec<Option<ArrayRef>>, patches: Option<&Patches>) {
+    pub fn push_slots(slots: &mut ArraySlots, patches: Option<&Patches>) {
         match patches {
             Some(p) => {
                 slots.push(Some(p.indices().clone()));

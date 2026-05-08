@@ -5,6 +5,7 @@ use std::hash::Hasher;
 
 use kernel::PARENT_KERNELS;
 use prost::Message;
+use smallvec::smallvec;
 use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
 use vortex_error::vortex_ensure;
@@ -161,7 +162,7 @@ impl VTable for Dict {
         Ok(ArrayParts::new(self.clone(), dtype.clone(), len, unsafe {
             DictData::new_unchecked().set_all_values_referenced(all_values_referenced)
         })
-        .with_slots(vec![Some(codes), Some(values)]))
+        .with_slots(smallvec![Some(codes), Some(values)]))
     }
 
     fn slot_name(_array: ArrayView<'_, Self>, idx: usize) -> String {
