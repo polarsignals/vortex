@@ -11,7 +11,6 @@ use crate::LEGACY_SESSION;
 #[expect(deprecated)]
 use crate::ToCanonical as _;
 use crate::VortexSessionExecute;
-use crate::aggregate_fn::fns::min_max::min_max;
 use crate::arrays::ConstantArray;
 use crate::arrays::ListViewArray;
 use crate::arrays::PrimitiveArray;
@@ -19,7 +18,6 @@ use crate::arrays::listview::ListViewArrayExt;
 use crate::arrays::primitive::PrimitiveArrayExt;
 use crate::builders::builder_with_capacity;
 use crate::builtins::ArrayBuiltins;
-use crate::dtype::DType;
 use crate::dtype::IntegerPType;
 use crate::dtype::Nullability;
 use crate::dtype::PType;
@@ -54,6 +52,16 @@ fn rebuilt_offset_ptype(offsets_ptype: PType) -> PType {
 /// list element dtypes.
 pub const DEFAULT_REBUILD_DENSITY_THRESHOLD: f32 = 0.1;
 
+/// Waste threshold to decide whether to trim a zero-copy-to-list `ListViewArray`.
+///
+/// A zero-copy-to-list array has no overlaps and no interior gaps, so its only unreferenced bytes
+/// are leading and trailing elements. Trimming those is much cheaper than a full rebuild (a lazy
+/// `elements` slice plus an `O(num_lists)` offset adjustment, with no element data copy), so we use
+/// a more aggressive threshold than [`DEFAULT_REBUILD_DENSITY_THRESHOLD`].
+///
+/// When the unreferenced (leading + trailing) fraction of `elements` exceeds this threshold, we trim.
+pub const DEFAULT_TRIM_ELEMENTS_THRESHOLD: f32 = 0.05;
+
 /// Modes for rebuilding a [`ListViewArray`].
 pub enum ListViewRebuildMode {
     /// Removes all unused data and flattens out all list data, such that the array is zero-copyable
@@ -67,6 +75,9 @@ pub enum ListViewRebuildMode {
 
     /// Removes any leading or trailing elements that are unused / not referenced by any views in
     /// the [`ListViewArray`].
+    ///
+    /// If the referenced `[start, end)` bounds are already known, prefer calling
+    /// [`trim_elements`](ListViewArray::trim_elements) directly to avoid recomputing them.
     TrimElements,
 
     /// Equivalent to `MakeZeroCopyToList` plus `TrimElements`.
@@ -335,58 +346,24 @@ impl ListViewArray {
 
     /// Rebuilds a [`ListViewArray`] by trimming any unused / unreferenced leading and trailing
     /// elements, which is defined as a contiguous run of values in the `elements` array that are
-    /// not referecened by any views in the corresponding [`ListViewArray`].
+    /// not referenced by any views in the corresponding [`ListViewArray`].
     fn rebuild_trim_elements(&self) -> VortexResult<ListViewArray> {
-        let start = if self.is_zero_copy_to_list() {
-            // If offsets are sorted, then the minimum offset is the first offset.
-            // Note that even if the first view is null, offsets must always be valid, so it is
-            // completely fine for us to use this as a lower-bounded start of the `elements`.
-            self.offset_at(0)
-        } else {
-            let mut ctx = LEGACY_SESSION.create_execution_ctx();
-            self.offsets()
-                .statistics()
-                .compute_min(&mut ctx)
-                .vortex_expect(
-                    "[ListViewArray::rebuild]: `offsets` must report min statistic that is a `usize`",
-                )
-        };
+        let mut ctx = LEGACY_SESSION.create_execution_ctx();
+        let (start, end) = self.referenced_element_bounds(&mut ctx)?;
 
-        let end = if self.is_zero_copy_to_list() {
-            // If offsets are sorted and there are no overlaps (views are always "increasing"), we
-            // can just grab the last offset and last size.
-            let last_offset = self.offset_at(self.len() - 1);
-            let last_size = self.size_at(self.len() - 1);
-            last_offset + last_size
-        } else {
-            // Cast offsets and sizes to the widest integer type to prevent
-            // overflow when computing offsets + sizes. The end offset may not
-            // fit in the integer width otherwise.
-            let wide_dtype = DType::from(if self.offsets().dtype().as_ptype().is_unsigned_int() {
-                PType::U64
-            } else {
-                PType::I64
-            });
-            let offsets = self.offsets().cast(wide_dtype.clone())?;
-            let sizes = self.sizes().cast(wide_dtype)?;
+        // SAFETY: we calculated valid start and end bounds
+        unsafe { self.trim_elements(start, end) }
+    }
 
-            let mut ctx = LEGACY_SESSION.create_execution_ctx();
-            let min_max = min_max(
-                &offsets
-                    .binary(sizes, Operator::Add)
-                    .vortex_expect("`offsets + sizes` somehow overflowed"),
-                &mut ctx,
-            )
-            .vortex_expect("Something went wrong while computing min and max")
-            .vortex_expect("We checked that the array was not empty in the top-level `rebuild`");
-
-            min_max
-                .max
-                .as_primitive()
-                .as_::<usize>()
-                .vortex_expect("unable to interpret the max `offset + size` as a `usize`")
-        };
-
+    /// Unsafely trims `elements` to the referenced half-open range `[start, end)`, adjusting every offset
+    /// down by `start`. The result preserves the original `is_zero_copy_to_list` flag.
+    ///
+    /// # SAFETY
+    ///
+    /// `start` must be the minimum value of `offsets`, and end should be the maximum value of `offsets[i] + size[i]`
+    /// over all indices `i` of offsets. Otherwise, `offsets` and `sizes` may hold references to elements that no longer exist
+    /// and the array will be corrupted.
+    pub unsafe fn trim_elements(&self, start: usize, end: usize) -> VortexResult<ListViewArray> {
         let adjusted_offsets = match_each_integer_ptype!(self.offsets().dtype().as_ptype(), |O| {
             let offset = <O as FromPrimitive>::from_usize(start)
                 .vortex_expect("unable to convert the min offset `start` into a `usize`");
