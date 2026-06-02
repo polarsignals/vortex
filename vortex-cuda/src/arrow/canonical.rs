@@ -139,15 +139,20 @@ fn export_canonical(
             Canonical::Bool(bool_array) => {
                 let len = bool_array.len();
                 let validity = bool_array.validity()?;
-                let BoolDataParts {
-                    bits, offset, len, ..
-                } = bool_array.into_data().into_parts(len);
+                let BoolDataParts { bits, meta } = bool_array.into_data().into_parts(len);
 
                 let (validity_buffer, null_count) =
-                    export_arrow_validity_buffer(validity, len, offset, ctx).await?;
+                    export_arrow_validity_buffer(validity, len, meta.offset(), ctx).await?;
 
                 let bits = ctx.ensure_on_device(bits).await?;
-                export_fixed_size(bits, len, offset, validity_buffer, null_count, ctx)
+                export_fixed_size(
+                    bits,
+                    meta.len(),
+                    meta.offset(),
+                    validity_buffer,
+                    null_count,
+                    ctx,
+                )
             }
             Canonical::VarBinView(varbinview) => {
                 let len = varbinview.len();
