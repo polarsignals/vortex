@@ -19,7 +19,7 @@ use vortex_utils::dyn_traits::DynHash;
 
 use crate::ArrayEq;
 use crate::ArrayHash;
-use crate::Precision;
+use crate::EqMode;
 
 /// A handle to a buffer allocation.
 ///
@@ -409,14 +409,14 @@ impl BufferHandle {
 
 impl ArrayHash for BufferHandle {
     // TODO(aduffy): implement for array hash
-    fn array_hash<H: Hasher>(&self, state: &mut H, precision: Precision) {
+    fn array_hash<H: Hasher>(&self, state: &mut H, accuracy: EqMode) {
         match &self.0 {
-            Inner::Host(host) => host.array_hash(state, precision),
-            Inner::Device(dev) => match precision {
-                Precision::Ptr => {
+            Inner::Host(host) => host.array_hash(state, accuracy),
+            Inner::Device(dev) => match accuracy {
+                EqMode::Ptr => {
                     Arc::as_ptr(dev).hash(state);
                 }
-                Precision::Value => {
+                EqMode::Value => {
                     dev.hash(state);
                 }
             },
@@ -425,12 +425,12 @@ impl ArrayHash for BufferHandle {
 }
 
 impl ArrayEq for BufferHandle {
-    fn array_eq(&self, other: &Self, precision: Precision) -> bool {
+    fn array_eq(&self, other: &Self, accuracy: EqMode) -> bool {
         match (&self.0, &other.0) {
-            (Inner::Host(b), Inner::Host(b2)) => b.array_eq(b2, precision),
-            (Inner::Device(b), Inner::Device(b2)) => match precision {
-                Precision::Ptr => Arc::ptr_eq(b, b2),
-                Precision::Value => b.eq(b2),
+            (Inner::Host(b), Inner::Host(b2)) => b.array_eq(b2, accuracy),
+            (Inner::Device(b), Inner::Device(b2)) => match accuracy {
+                EqMode::Ptr => Arc::ptr_eq(b, b2),
+                EqMode::Value => b.eq(b2),
             },
             _ => false,
         }

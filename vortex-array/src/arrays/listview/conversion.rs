@@ -293,9 +293,9 @@ mod tests {
     use super::recursive_list_from_list_view;
     use crate::ArrayEq;
     use crate::ArrayRef;
+    use crate::EqMode;
     use crate::IntoArray;
     use crate::LEGACY_SESSION;
-    use crate::Precision;
     use crate::VortexSessionExecute;
     use crate::arrays::BoolArray;
     use crate::arrays::FixedSizeListArray;
@@ -395,7 +395,7 @@ mod tests {
             nullable_list_view
                 .validity()
                 .vortex_expect("listview validity should be derivable")
-                .array_eq(&validity, Precision::Ptr)
+                .array_eq(&validity, EqMode::Ptr)
         );
         assert_eq!(nullable_list_view.len(), 3);
 

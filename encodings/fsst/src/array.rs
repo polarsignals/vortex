@@ -21,11 +21,11 @@ use vortex_array::ArrayRef;
 use vortex_array::ArraySlots;
 use vortex_array::ArrayView;
 use vortex_array::Canonical;
+use vortex_array::EqMode;
 use vortex_array::ExecutionCtx;
 use vortex_array::ExecutionResult;
 use vortex_array::IntoArray;
 use vortex_array::LEGACY_SESSION;
-use vortex_array::Precision;
 use vortex_array::TypedArrayRef;
 use vortex_array::VortexSessionExecute;
 use vortex_array::arrays::VarBin;
@@ -80,7 +80,7 @@ impl FSSTMetadata {
 }
 
 impl ArrayHash for FSSTData {
-    fn array_hash<H: Hasher>(&self, state: &mut H, precision: Precision) {
+    fn array_hash<H: Hasher>(&self, state: &mut H, precision: EqMode) {
         self.symbol_table.symbols.array_hash(state, precision);
         self.symbol_table
             .symbol_lengths
@@ -90,7 +90,7 @@ impl ArrayHash for FSSTData {
 }
 
 impl ArrayEq for FSSTData {
-    fn array_eq(&self, other: &Self, precision: Precision) -> bool {
+    fn array_eq(&self, other: &Self, precision: EqMode) -> bool {
         self.symbol_table
             .symbols
             .array_eq(&other.symbol_table.symbols, precision)
