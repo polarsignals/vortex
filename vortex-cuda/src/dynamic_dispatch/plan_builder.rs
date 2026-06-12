@@ -139,7 +139,9 @@ fn is_dyn_dispatch_cast_compatible(array: &ArrayRef) -> bool {
     let Ok(source_ptype) = PType::try_from(cast.child_at(0).dtype()) else {
         return false;
     };
-    let target_ptype = cast.scalar_fn().as_::<Cast>().as_ptype();
+    let Ok(target_ptype) = PType::try_from(cast.scalar_fn().as_::<Cast>()) else {
+        return false;
+    };
 
     // Implemented as unsigned dictionary-code casts to cuDF's signed index types.
     // LOAD/BITUNPACK materialize directly into the target-width output type.
@@ -890,5 +892,31 @@ impl FusedPlan {
             .unwrap_or(spec.source_ptype);
         let final_elem_bytes = tag_to_ptype(final_ptype).byte_width() as u32;
         len * final_elem_bytes.max(output_elem_bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vortex::array::IntoArray;
+    use vortex::array::arrays::PrimitiveArray;
+    use vortex::array::builtins::ArrayBuiltins;
+    use vortex::dtype::DType;
+    use vortex::dtype::Nullability;
+
+    use super::*;
+
+    #[test]
+    fn cast_to_non_primitive_target_is_not_dyn_dispatch_compatible() -> VortexResult<()> {
+        let cast = PrimitiveArray::from_iter([0u8, 1])
+            .into_array()
+            .cast(DType::Bool(Nullability::NonNullable))?;
+
+        assert!(!is_dyn_dispatch_cast_compatible(&cast));
+        assert!(matches!(
+            DispatchPlan::new(&cast, CudaDispatchMode::DynDispatchOnly)?,
+            DispatchPlan::Unfused
+        ));
+
+        Ok(())
     }
 }
