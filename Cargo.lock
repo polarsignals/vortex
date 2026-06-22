@@ -1976,7 +1976,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "parking_lot",
  "rand 0.9.4",
  "regex",
@@ -2030,7 +2030,7 @@ dependencies = [
  "itertools 0.14.0",
  "liblzma",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "parking_lot",
  "parquet",
  "sqlparser 0.62.0",
@@ -2053,7 +2053,7 @@ dependencies = [
  "datafusion-physical-plan 54.0.0",
  "futures",
  "itertools 0.14.0",
- "object_store 0.13.2",
+ "object_store",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -2087,7 +2087,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "parking_lot",
  "tokio",
 ]
@@ -2112,7 +2112,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "parking_lot",
  "tokio",
 ]
@@ -2137,7 +2137,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "log",
- "object_store 0.13.2",
+ "object_store",
 ]
 
 [[package]]
@@ -2160,7 +2160,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "log",
- "object_store 0.13.2",
+ "object_store",
 ]
 
 [[package]]
@@ -2179,7 +2179,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "paste",
  "sqlparser 0.61.0",
  "tokio",
@@ -2203,7 +2203,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "parquet",
  "recursive",
  "sqlparser 0.62.0",
@@ -2257,7 +2257,7 @@ dependencies = [
  "glob",
  "itertools 0.14.0",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "rand 0.9.4",
  "tokio",
  "url",
@@ -2290,7 +2290,7 @@ dependencies = [
  "itertools 0.14.0",
  "liblzma",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "parking_lot",
  "rand 0.9.4",
  "tokio",
@@ -2319,7 +2319,7 @@ dependencies = [
  "datafusion-session 53.1.0",
  "futures",
  "itertools 0.14.0",
- "object_store 0.13.2",
+ "object_store",
  "tokio",
 ]
 
@@ -2343,7 +2343,7 @@ dependencies = [
  "datafusion-session 54.0.0",
  "futures",
  "itertools 0.14.0",
- "object_store 0.13.2",
+ "object_store",
  "tokio",
 ]
 
@@ -2363,7 +2363,7 @@ dependencies = [
  "datafusion-physical-plan 54.0.0",
  "datafusion-session 54.0.0",
  "futures",
- "object_store 0.13.2",
+ "object_store",
 ]
 
 [[package]]
@@ -2384,7 +2384,7 @@ dependencies = [
  "datafusion-physical-plan 53.1.0",
  "datafusion-session 53.1.0",
  "futures",
- "object_store 0.13.2",
+ "object_store",
  "regex",
  "tokio",
 ]
@@ -2407,7 +2407,7 @@ dependencies = [
  "datafusion-physical-plan 54.0.0",
  "datafusion-session 54.0.0",
  "futures",
- "object_store 0.13.2",
+ "object_store",
  "regex",
  "tokio",
 ]
@@ -2430,7 +2430,7 @@ dependencies = [
  "datafusion-physical-plan 53.1.0",
  "datafusion-session 53.1.0",
  "futures",
- "object_store 0.13.2",
+ "object_store",
  "serde_json",
  "tokio",
  "tokio-stream",
@@ -2454,7 +2454,7 @@ dependencies = [
  "datafusion-physical-plan 54.0.0",
  "datafusion-session 54.0.0",
  "futures",
- "object_store 0.13.2",
+ "object_store",
  "tokio",
  "tokio-stream",
 ]
@@ -2484,7 +2484,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "parking_lot",
  "parquet",
  "tokio",
@@ -2518,7 +2518,7 @@ dependencies = [
  "datafusion-physical-expr-common 53.1.0",
  "futures",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "parking_lot",
  "rand 0.9.4",
  "tempfile",
@@ -2540,7 +2540,7 @@ dependencies = [
  "datafusion-physical-expr-common 54.0.0",
  "futures",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "parking_lot",
  "rand 0.9.4",
  "tempfile",
@@ -3303,7 +3303,7 @@ dependencies = [
  "indicatif",
  "itertools 0.14.0",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "sqllogictest",
  "sqlparser 0.62.0",
  "tempfile",
@@ -3830,9 +3830,9 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "fsst"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83cf860f6a6bf0a6a60fdfe5a36c75121fad5ea4332d1d12deee3e65b6047727"
+checksum = "bcd0ce0249ac12fd44fcde62d435c36d881952c2f0df4d1de24b45e1dbba5ddb"
 dependencies = [
  "arrow-array",
  "rand 0.9.4",
@@ -5010,10 +5010,11 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
 name = "lance"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d34e854994e84d043897f5ec9fb609221e9e69e3fd52996cd715d979fcd349f6"
+checksum = "3944aca86f4c78f4da04af1c2bf33e664a2826b7af72972ad200d6b9de59019f"
 dependencies = [
+ "arc-swap",
  "arrow",
  "arrow-arith",
  "arrow-array",
@@ -5027,9 +5028,11 @@ dependencies = [
  "async-recursion",
  "async-trait",
  "async_cell",
+ "bitpacking",
  "byteorder",
  "bytes",
  "chrono",
+ "crossbeam-queue",
  "crossbeam-skiplist",
  "dashmap",
  "datafusion 53.1.0",
@@ -5056,13 +5059,14 @@ dependencies = [
  "lance-tokenizer",
  "log",
  "moka",
- "object_store 0.12.5",
+ "object_store",
  "permutation",
  "pin-project",
  "prost 0.14.4",
  "prost-build",
  "prost-types",
  "rand 0.9.4",
+ "rayon",
  "roaring",
  "semver",
  "serde",
@@ -5078,13 +5082,12 @@ dependencies = [
 
 [[package]]
 name = "lance-arrow"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7827fe404358c27d120ee8ea8ef7b9415c2911d54072bec83dd689d750ae65da"
+checksum = "253f4a0a70580c985b91e65e9ca6cad644825a4078de28d8efbacf3ffbd7ecdc"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
- "arrow-cast",
  "arrow-data",
  "arrow-ipc",
  "arrow-ord",
@@ -5119,9 +5122,9 @@ dependencies = [
 
 [[package]]
 name = "lance-bitpacking"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cd0b31570d50fe13c7e4e36b03e1f1c99c3d8e5a34845b24b0665b51b40570d"
+checksum = "80c4d12521b1945041dd515a56aa0854973138e7ac12111c92572e33e4ecb593"
 dependencies = [
  "arrayref",
  "paste",
@@ -5130,9 +5133,9 @@ dependencies = [
 
 [[package]]
 name = "lance-core"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b128c213c676cb8e03c62a68670642770825171e64097cc2da97cbb19fe35d29"
+checksum = "13f84020da5a484e2f07dd1796e09785ed7cd889857ebc4cb77e32ef214ee594"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -5140,7 +5143,6 @@ dependencies = [
  "async-trait",
  "byteorder",
  "bytes",
- "chrono",
  "datafusion-common 53.1.0",
  "datafusion-sql 53.1.0",
  "deepsize",
@@ -5149,10 +5151,9 @@ dependencies = [
  "lance-arrow",
  "libc",
  "log",
- "mock_instant",
  "moka",
  "num_cpus",
- "object_store 0.12.5",
+ "object_store",
  "pin-project",
  "prost 0.14.4",
  "rand 0.9.4",
@@ -5169,9 +5170,9 @@ dependencies = [
 
 [[package]]
 name = "lance-datafusion"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e03b2de71cbcd09b10bf1a17c83cacbc0176ecd97203fb72b9e59d9b8f9a3743"
+checksum = "7460597a66534a75987993d4dac5bc330586d99c5b79ae73367dbcbd4e29e576"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -5195,16 +5196,15 @@ dependencies = [
  "pin-project",
  "prost 0.14.4",
  "prost-build",
- "snafu",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "lance-datagen"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fe7c7ea7fd397e495a1646fec360e46ee0cbd75718f1c0e887aad657c5f2944"
+checksum = "046f5506ed2271cd941a050de7bf535dd3aedc291aadec836a63fa56c5926e3b"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -5222,9 +5222,9 @@ dependencies = [
 
 [[package]]
 name = "lance-encoding"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe3f8070835b407d8db9ea8728386bc3207ba23c66a9c22d344e231ef12b77ca"
+checksum = "7af54edf43dcf9d6a56cc636eb35d457e68373c6448dca3f0891b3325b4a24e6"
 dependencies = [
  "arrow-arith",
  "arrow-array",
@@ -5249,9 +5249,7 @@ dependencies = [
  "num-traits",
  "prost 0.14.4",
  "prost-build",
- "prost-types",
  "rand 0.9.4",
- "snafu",
  "strum 0.26.3",
  "tokio",
  "tracing",
@@ -5261,9 +5259,9 @@ dependencies = [
 
 [[package]]
 name = "lance-file"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6dfcf654549330df3aef708cd7c12e170feecddd34d6c19dd005b4153213268"
+checksum = "0772ae2d6207995dc1eb28aff9507f78e90b3362b58f311da001e9dc25f3d736"
 dependencies = [
  "arrow-arith",
  "arrow-array",
@@ -5284,21 +5282,21 @@ dependencies = [
  "lance-io",
  "log",
  "num-traits",
- "object_store 0.12.5",
+ "object_store",
  "prost 0.14.4",
  "prost-build",
  "prost-types",
- "snafu",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "lance-index"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fb8ad0bd10efa2608634a2518b7dd501231e76c56a65fbd6519e23914cc425a"
+checksum = "e71fbfb51096a903cb524fe0da716f5f15fbc4a6b6f84cd6dec21abf319c5e84"
 dependencies = [
+ "arc-swap",
  "arrow",
  "arrow-arith",
  "arrow-array",
@@ -5317,7 +5315,6 @@ dependencies = [
  "datafusion-common 53.1.0",
  "datafusion-expr 53.1.0",
  "datafusion-physical-expr 53.1.0",
- "datafusion-sql 53.1.0",
  "deepsize",
  "dirs",
  "fst",
@@ -5339,7 +5336,7 @@ dependencies = [
  "log",
  "ndarray",
  "num-traits",
- "object_store 0.12.5",
+ "object_store",
  "prost 0.14.4",
  "prost-build",
  "prost-types",
@@ -5351,7 +5348,6 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
- "snafu",
  "tempfile",
  "tokio",
  "tracing",
@@ -5361,9 +5357,9 @@ dependencies = [
 
 [[package]]
 name = "lance-io"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef5314703fa8c8baed04193cc669da80ab42521c6319d3cc921a4a997690dcc0"
+checksum = "bab8c98ef1b870b20541d27f3ca4efdf7c9f5c25214233be07d231ba88900219"
 dependencies = [
  "arrow",
  "arrow-arith",
@@ -5385,16 +5381,14 @@ dependencies = [
  "lance-arrow",
  "lance-core",
  "lance-namespace",
- "libc",
  "log",
  "moka",
- "object_store 0.12.5",
+ "object_store",
  "path_abs",
  "pin-project",
  "prost 0.14.4",
  "rand 0.9.4",
  "serde",
- "snafu",
  "tempfile",
  "tokio",
  "tracing",
@@ -5403,9 +5397,9 @@ dependencies = [
 
 [[package]]
 name = "lance-linalg"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51aa9b73279f505b2bec0f194c7a2390ca74ad3260131e631a7bef8d97d54b2e"
+checksum = "6b4c51cad0ac780b02dc4da48528479e7693c03e8d05390510bbc69ca2a9a1f1"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -5421,16 +5415,15 @@ dependencies = [
 
 [[package]]
 name = "lance-namespace"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39cd01581f55ce45c49cbe494ee86c7ba7ca4ca3654690fd820941cd9105a46e"
+checksum = "014e8332ca0615506342e0d3af608639864b68396973be14239f09c9f21f1fc2"
 dependencies = [
  "arrow",
  "async-trait",
  "bytes",
  "lance-core",
  "lance-namespace-reqwest-client",
- "serde",
  "snafu",
 ]
 
@@ -5450,9 +5443,9 @@ dependencies = [
 
 [[package]]
 name = "lance-table"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5db70650465a1af174b7dfe6948ec91a3d466ada12e11274eb66e51132173aa0"
+checksum = "b16f1355904aea4ebb04ffc70c58c97901e10bde44452b4b021de4a1f329250d"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -5470,7 +5463,7 @@ dependencies = [
  "lance-file",
  "lance-io",
  "log",
- "object_store 0.12.5",
+ "object_store",
  "prost 0.14.4",
  "prost-build",
  "prost-types",
@@ -5489,9 +5482,9 @@ dependencies = [
 
 [[package]]
 name = "lance-tokenizer"
-version = "6.0.1"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb08ef9382c9d58036c323db2c19cc097e02d1d0d87714fc7176b5d3b36a31aa"
+checksum = "b39b7f5ed9d0c0b716bf599b559d888267ed1dfe4c4e29d3648b51d2a28940cf"
 dependencies = [
  "rust-stemmers",
  "serde",
@@ -5955,12 +5948,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mock_instant"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bb517913cfcfb9eeda59f36020269075a152701a01606c612f547e4890be399"
-
-[[package]]
 name = "moka"
 version = "0.12.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6264,30 +6251,6 @@ dependencies = [
 
 [[package]]
 name = "object_store"
-version = "0.12.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbfbfff40aeccab00ec8a910b57ca8ecf4319b335c542f2edcd19dd25a1e2a00"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "futures",
- "http",
- "humantime",
- "itertools 0.14.0",
- "parking_lot",
- "percent-encoding",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
- "walkdir",
- "wasm-bindgen-futures",
- "web-time",
-]
-
-[[package]]
-name = "object_store"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "622acbc9100d3c10e2ee15804b0caa40e55c933d5aa53814cd520805b7958a49"
@@ -6586,7 +6549,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
- "object_store 0.13.2",
+ "object_store",
  "paste",
  "seq-macro",
  "simdutf8",
@@ -7145,7 +7108,7 @@ dependencies = [
  "http",
  "humantime",
  "itertools 0.14.0",
- "object_store 0.13.2",
+ "object_store",
  "percent-encoding",
  "pyo3",
  "pyo3-async-runtimes",
@@ -9800,7 +9763,7 @@ dependencies = [
  "itertools 0.14.0",
  "kanal",
  "num-traits",
- "object_store 0.13.2",
+ "object_store",
  "parking_lot",
  "prost 0.14.4",
  "rstest",
@@ -9876,7 +9839,7 @@ dependencies = [
  "futures",
  "insta",
  "itertools 0.14.0",
- "object_store 0.13.2",
+ "object_store",
  "rstest",
  "tempfile",
  "tokio",
@@ -9933,7 +9896,7 @@ dependencies = [
  "jiff",
  "kanal",
  "num-traits",
- "object_store 0.13.2",
+ "object_store",
  "parking_lot",
  "paste",
  "reqwest 0.13.4",
@@ -9960,7 +9923,7 @@ dependencies = [
  "arrow-schema",
  "flatbuffers",
  "jiff",
- "object_store 0.13.2",
+ "object_store",
  "prost 0.14.4",
  "serial_test",
  "temp-env",
@@ -10000,7 +9963,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "mimalloc",
- "object_store 0.13.2",
+ "object_store",
  "paste",
  "prost 0.14.4",
  "rand 0.10.1",
@@ -10023,7 +9986,7 @@ dependencies = [
  "itertools 0.14.0",
  "kanal",
  "moka",
- "object_store 0.13.2",
+ "object_store",
  "oneshot",
  "parking_lot",
  "pin-project-lite",
@@ -10141,7 +10104,7 @@ dependencies = [
  "glob",
  "itertools 0.14.0",
  "kanal",
- "object_store 0.13.2",
+ "object_store",
  "oneshot",
  "parking_lot",
  "pin-project-lite",
@@ -10185,7 +10148,7 @@ dependencies = [
  "async-fs",
  "futures",
  "jni",
- "object_store 0.13.2",
+ "object_store",
  "parking_lot",
  "roaring",
  "thiserror 2.0.18",
@@ -10356,7 +10319,7 @@ dependencies = [
  "bytes",
  "itertools 0.14.0",
  "log",
- "object_store 0.13.2",
+ "object_store",
  "parking_lot",
  "pyo3",
  "pyo3-bytes",
