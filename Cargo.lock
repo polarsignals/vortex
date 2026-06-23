@@ -10166,8 +10166,10 @@ version = "0.1.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
+ "prost 0.14.4",
  "vortex-array",
  "vortex-error",
+ "vortex-proto",
  "vortex-session",
 ]
 
@@ -10281,6 +10283,7 @@ dependencies = [
  "vortex-error",
  "vortex-file",
  "vortex-io",
+ "vortex-json",
  "vortex-layout",
  "vortex-mask",
  "vortex-proto",
