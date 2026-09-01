@@ -11052,7 +11052,6 @@ dependencies = [
  "vortex",
  "vortex-array",
  "vortex-arrow",
- "vortex-reverse-index",
  "vortex-utils",
 ]
 
@@ -11389,6 +11388,7 @@ dependencies = [
 name = "vortex-layout"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arcref",
  "arrow-array 59.3.0",
  "arrow-schema 59.3.0",
@@ -11396,6 +11396,11 @@ dependencies = [
  "async-trait",
  "bit-vec",
  "codspeed-divan-compat",
+ "datafusion 55.1.0",
+ "datafusion-catalog 55.1.0",
+ "datafusion-common 55.1.0",
+ "datafusion-expr 55.1.0",
+ "datafusion-physical-plan 55.1.0",
  "flatbuffers",
  "futures",
  "goldenfile",
@@ -11404,6 +11409,7 @@ dependencies = [
  "kanal",
  "mimalloc",
  "moka",
+ "object_store 0.13.2",
  "once_cell",
  "parking_lot",
  "paste",
@@ -11419,12 +11425,16 @@ dependencies = [
  "tokio",
  "tracing",
  "twox-hash",
+ "url",
  "uuid",
  "vortex-array",
  "vortex-arrow",
  "vortex-btrblocks",
  "vortex-buffer",
+ "vortex-datafusion",
+ "vortex-edition",
  "vortex-error",
+ "vortex-file",
  "vortex-io",
  "vortex-mask",
  "vortex-metrics",
@@ -11572,24 +11582,6 @@ dependencies = [
  "vortex",
  "vortex-cuda",
  "vortex-python-abi",
-]
-
-[[package]]
-name = "vortex-reverse-index"
-version = "0.1.0"
-dependencies = [
- "roaring",
- "tokio",
- "vortex-array",
- "vortex-buffer",
- "vortex-edition",
- "vortex-error",
- "vortex-file",
- "vortex-io",
- "vortex-layout",
- "vortex-mask",
- "vortex-session",
- "vortex-utils",
 ]
 
 [[package]]
