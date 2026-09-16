@@ -13,6 +13,8 @@ use vortex_array::ExecutionCtx;
 use vortex_array::VortexSessionExecute;
 use vortex_array::aggregate_fn::AccumulatorRef;
 use vortex_array::aggregate_fn::AggregateFnRef;
+use vortex_array::aggregate_fn::fns::max::Max;
+use vortex_array::aggregate_fn::fns::min::Min;
 use vortex_array::arrays::StructArray;
 use vortex_array::arrays::struct_::StructArrayExt;
 use vortex_array::builders::ArrayBuilder;
@@ -46,7 +48,7 @@ use crate::sequence::SequentialStreamExt;
 
 pub fn accumulate_stats(
     stream: SendableSequentialStream,
-    stats: Arc<[Stat]>,
+    stats: Arc<[AggregateFnRef]>,
     max_variable_length_statistics_size: usize,
     session: &VortexSession,
     write_legacy_stats: bool,
@@ -80,7 +82,11 @@ struct StatsAccumulator {
 }
 
 impl StatsAccumulator {
-    fn new(dtype: &DType, stats: &[Stat], max_variable_length_statistics_size: usize) -> Self {
+    fn new(
+        dtype: &DType,
+        stats: &[AggregateFnRef],
+        max_variable_length_statistics_size: usize,
+    ) -> Self {
         if !supports_file_stats(dtype) {
             return Self {
                 aggregates: Vec::new(),
@@ -93,11 +99,11 @@ impl StatsAccumulator {
         let mut aggregates = Vec::new();
         let mut truncated: Vec<Box<dyn StatsArrayBuilder>> = Vec::new();
 
-        for &stat in stats {
-            if is_varlen && matches!(stat, Stat::Min | Stat::Max) {
-                if let Some(stat_dtype) = stat.dtype(dtype) {
+        for aggregate_fn in stats {
+            if is_varlen && (aggregate_fn.is::<Min>() || aggregate_fn.is::<Max>()) {
+                if let Some(stat_dtype) = aggregate_fn.return_dtype(dtype) {
                     truncated.push(stats_builder_with_capacity(
-                        stat,
+                        aggregate_fn.clone(),
                         &stat_dtype.as_nullable(),
                         1024,
                         max_variable_length_statistics_size,
@@ -106,13 +112,11 @@ impl StatsAccumulator {
                 continue;
             }
 
-            // `IsConstant`/`IsSorted`/`IsStrictSorted` have no aggregate-fn equivalent, and a
-            // dtype that doesn't support a given aggregate simply fails to build an accumulator —
-            // both cases are silently skipped, matching this stat's absence from the result.
-            if let Some(aggregate_fn) = stat.aggregate_fn()
-                && let Ok(accumulator) = aggregate_fn.accumulator(dtype)
-            {
-                aggregates.push((aggregate_fn, accumulator));
+            // A dtype that doesn't support a given aggregate simply fails to build an
+            // accumulator, which is silently skipped, matching this stat's absence from the
+            // result.
+            if let Ok(accumulator) = aggregate_fn.accumulator(dtype) {
+                aggregates.push((aggregate_fn.clone(), accumulator));
             }
         }
 
@@ -128,7 +132,9 @@ impl StatsAccumulator {
             accumulator.accumulate(array, ctx)?;
         }
         for builder in &mut self.truncated {
-            if let Some(value) = array.statistics().compute_stat(builder.stat(), ctx)? {
+            let stat = Stat::from_aggregate_fn(&builder.stat())
+                .vortex_expect("truncated builder stat is always min or max");
+            if let Some(value) = array.statistics().compute_stat(stat, ctx)? {
                 builder.append_scalar(value.cast(&value.dtype().as_nullable())?)?;
             } else {
                 builder.append_null();
@@ -149,7 +155,9 @@ impl StatsAccumulator {
             .truncated
             .iter_mut()
             // We sort the stats so the DType is deterministic based on which stats are present.
-            .sorted_unstable_by_key(|builder| builder.stat())
+            // `AggregateFnRef` has no `Ord`, so use a proxy key that reproduces the same
+            // Max-before-Min order the legacy `Stat` discriminants gave us.
+            .sorted_unstable_by_key(|builder| !builder.stat().is::<Max>())
         {
             let values = builder.finish();
 
@@ -186,7 +194,10 @@ impl StatsAccumulator {
         };
 
         for builder in &self.truncated {
-            let stat = builder.stat();
+            let aggregate_fn = builder.stat();
+            let Some(stat) = Stat::from_aggregate_fn(&aggregate_fn) else {
+                continue;
+            };
             let Some(values) = stats_table.unmasked_field_by_name_opt(stat.name()) else {
                 continue;
             };
@@ -200,7 +211,7 @@ impl StatsAccumulator {
             if let Some(s) = values.statistics().compute_stat(stat, ctx)?
                 && let Some(v) = s.into_value()
             {
-                let precision = if stat_was_truncated(&stats_table, stat, ctx)? {
+                let precision = if stat_was_truncated(&stats_table, aggregate_fn, ctx)? {
                     Precision::inexact(v)
                 } else {
                     Precision::exact(v)
@@ -215,13 +226,15 @@ impl StatsAccumulator {
 
 fn stat_was_truncated(
     stats_table: &StructArray,
-    stat: Stat,
+    aggregate_fn: AggregateFnRef,
     ctx: &mut ExecutionCtx,
 ) -> VortexResult<bool> {
-    let field_name = match stat {
-        Stat::Min => MIN_IS_TRUNCATED,
-        Stat::Max => MAX_IS_TRUNCATED,
-        _ => return Ok(false),
+    let field_name = if aggregate_fn.is::<Min>() {
+        MIN_IS_TRUNCATED
+    } else if aggregate_fn.is::<Max>() {
+        MAX_IS_TRUNCATED
+    } else {
+        return Ok(false);
     };
     let Some(is_truncated) = stats_table.unmasked_field_by_name_opt(field_name) else {
         return Ok(false);
@@ -245,10 +258,10 @@ fn is_varlen_dtype(dtype: &DType) -> bool {
 ///
 /// # Panics
 ///
-/// Panics if `stat` is not `Min` or `Max`, or `dtype` is not `Utf8`/`Binary` — callers only
-/// reach this for varlen Min/Max (see [`StatsAccumulator::new`]).
+/// Panics if `aggregate_fn` is not `Min` or `Max`, or `dtype` is not `Utf8`/`Binary` — callers
+/// only reach this for varlen Min/Max (see [`StatsAccumulator::new`]).
 fn stats_builder_with_capacity(
-    stat: Stat,
+    aggregate_fn: AggregateFnRef,
     dtype: &DType,
     capacity: usize,
     max_length: usize,
@@ -258,51 +271,44 @@ fn stats_builder_with_capacity(
         capacity,
         vortex_buffer::BufferAllocatorRef::static_ref(),
     );
-    match (stat, dtype) {
-        (Stat::Max, DType::Utf8(_)) => {
-            Box::new(TruncatedMaxBinaryStatsBuilder::<BufferString>::new(
-                values_builder,
-                BoolBuilder::with_capacity_in(
-                    Nullability::NonNullable,
-                    capacity,
-                    vortex_buffer::BufferAllocatorRef::static_ref(),
-                ),
-                max_length,
-            ))
-        }
-        (Stat::Max, DType::Binary(_)) => {
-            Box::new(TruncatedMaxBinaryStatsBuilder::<ByteBuffer>::new(
-                values_builder,
-                BoolBuilder::with_capacity_in(
-                    Nullability::NonNullable,
-                    capacity,
-                    vortex_buffer::BufferAllocatorRef::static_ref(),
-                ),
-                max_length,
-            ))
-        }
-        (Stat::Min, DType::Utf8(_)) => {
-            Box::new(TruncatedMinBinaryStatsBuilder::<BufferString>::new(
-                values_builder,
-                BoolBuilder::with_capacity_in(
-                    Nullability::NonNullable,
-                    capacity,
-                    vortex_buffer::BufferAllocatorRef::static_ref(),
-                ),
-                max_length,
-            ))
-        }
-        (Stat::Min, DType::Binary(_)) => {
-            Box::new(TruncatedMinBinaryStatsBuilder::<ByteBuffer>::new(
-                values_builder,
-                BoolBuilder::with_capacity_in(
-                    Nullability::NonNullable,
-                    capacity,
-                    vortex_buffer::BufferAllocatorRef::static_ref(),
-                ),
-                max_length,
-            ))
-        }
+    let is_max = aggregate_fn.is::<Max>();
+    match dtype {
+        DType::Utf8(_) if is_max => Box::new(TruncatedMaxBinaryStatsBuilder::<BufferString>::new(
+            values_builder,
+            BoolBuilder::with_capacity_in(
+                Nullability::NonNullable,
+                capacity,
+                vortex_buffer::BufferAllocatorRef::static_ref(),
+            ),
+            max_length,
+        )),
+        DType::Binary(_) if is_max => Box::new(TruncatedMaxBinaryStatsBuilder::<ByteBuffer>::new(
+            values_builder,
+            BoolBuilder::with_capacity_in(
+                Nullability::NonNullable,
+                capacity,
+                vortex_buffer::BufferAllocatorRef::static_ref(),
+            ),
+            max_length,
+        )),
+        DType::Utf8(_) => Box::new(TruncatedMinBinaryStatsBuilder::<BufferString>::new(
+            values_builder,
+            BoolBuilder::with_capacity_in(
+                Nullability::NonNullable,
+                capacity,
+                vortex_buffer::BufferAllocatorRef::static_ref(),
+            ),
+            max_length,
+        )),
+        DType::Binary(_) => Box::new(TruncatedMinBinaryStatsBuilder::<ByteBuffer>::new(
+            values_builder,
+            BoolBuilder::with_capacity_in(
+                Nullability::NonNullable,
+                capacity,
+                vortex_buffer::BufferAllocatorRef::static_ref(),
+            ),
+            max_length,
+        )),
         _ => unreachable!("stats_builder_with_capacity is only called for varlen Min/Max"),
     }
 }
@@ -320,7 +326,7 @@ impl NamedArrays {
 }
 
 trait StatsArrayBuilder: Send {
-    fn stat(&self) -> Stat;
+    fn stat(&self) -> AggregateFnRef;
 
     fn append_scalar(&mut self, value: Scalar) -> VortexResult<()>;
 
@@ -374,8 +380,10 @@ impl<T: ScalarTruncation> TruncatedMinBinaryStatsBuilder<T> {
 }
 
 impl<T: ScalarTruncation> StatsArrayBuilder for TruncatedMaxBinaryStatsBuilder<T> {
-    fn stat(&self) -> Stat {
+    fn stat(&self) -> AggregateFnRef {
         Stat::Max
+            .aggregate_fn()
+            .vortex_expect("max has an aggregate fn")
     }
 
     fn append_scalar(&mut self, value: Scalar) -> VortexResult<()> {
@@ -408,8 +416,10 @@ impl<T: ScalarTruncation> StatsArrayBuilder for TruncatedMaxBinaryStatsBuilder<T
 }
 
 impl<T: ScalarTruncation> StatsArrayBuilder for TruncatedMinBinaryStatsBuilder<T> {
-    fn stat(&self) -> Stat {
+    fn stat(&self) -> AggregateFnRef {
         Stat::Min
+            .aggregate_fn()
+            .vortex_expect("min has an aggregate fn")
     }
 
     fn append_scalar(&mut self, value: Scalar) -> VortexResult<()> {
@@ -490,7 +500,11 @@ enum StatsNode {
 }
 
 impl StatsNode {
-    fn build(dtype: &DType, stats: &[Stat], max_variable_length_statistics_size: usize) -> Self {
+    fn build(
+        dtype: &DType,
+        stats: &[AggregateFnRef],
+        max_variable_length_statistics_size: usize,
+    ) -> Self {
         match dtype.as_struct_fields_opt() {
             Some(struct_fields) => {
                 let children = struct_fields
@@ -615,7 +629,7 @@ pub struct FileStatsAccumulator {
 impl FileStatsAccumulator {
     fn new(
         dtype: &DType,
-        stats: Arc<[Stat]>,
+        stats: Arc<[AggregateFnRef]>,
         max_variable_length_statistics_size: usize,
         session: &VortexSession,
         write_legacy_stats: bool,
@@ -728,6 +742,11 @@ mod tests {
 
     use super::*;
 
+    fn agg(stat: Stat) -> AggregateFnRef {
+        stat.aggregate_fn()
+            .vortex_expect("test only uses stats with an aggregate fn")
+    }
+
     #[rstest]
     #[case(DType::Utf8(Nullability::NonNullable))]
     #[case(DType::Binary(Nullability::NonNullable))]
@@ -747,8 +766,11 @@ mod tests {
         );
         builder2.append_value("Another");
         builder2.append_value("wait a minute");
-        let mut acc =
-            StatsAccumulator::new(builder.dtype(), &[Stat::Max, Stat::Min, Stat::Sum], 12);
+        let mut acc = StatsAccumulator::new(
+            builder.dtype(),
+            &[agg(Stat::Max), agg(Stat::Min), agg(Stat::Sum)],
+            12,
+        );
         acc.push_chunk(&builder.finish(), &mut ctx)
             .vortex_expect("push_chunk should succeed for test data");
         acc.push_chunk(&builder2.finish(), &mut ctx)
@@ -798,7 +820,7 @@ mod tests {
         );
         builder.append_value("Value to be truncated");
         builder.append_value("Another truncated value");
-        let mut acc = StatsAccumulator::new(builder.dtype(), &[Stat::Max, Stat::Min], 12);
+        let mut acc = StatsAccumulator::new(builder.dtype(), &[agg(Stat::Max), agg(Stat::Min)], 12);
         acc.push_chunk(&builder.finish(), &mut ctx)
             .vortex_expect("push_chunk should succeed for test data");
 
@@ -814,7 +836,11 @@ mod tests {
     fn fixed_width_stats_omit_is_truncated_columns() -> VortexResult<()> {
         let mut ctx = array_session().create_execution_ctx();
         let array = buffer![0, 1, 2].into_array();
-        let mut acc = StatsAccumulator::new(array.dtype(), &[Stat::Max, Stat::Min, Stat::Sum], 12);
+        let mut acc = StatsAccumulator::new(
+            array.dtype(),
+            &[agg(Stat::Max), agg(Stat::Min), agg(Stat::Sum)],
+            12,
+        );
         acc.push_chunk(&array, &mut ctx)
             .vortex_expect("push_chunk should succeed for test array");
 
@@ -844,7 +870,12 @@ mod tests {
         let dtype = i32_dtype();
         let mut acc = StatsAccumulator::new(
             &dtype,
-            &[Stat::Max, Stat::Min, Stat::Sum, Stat::NullCount],
+            &[
+                agg(Stat::Max),
+                agg(Stat::Min),
+                agg(Stat::Sum),
+                agg(Stat::NullCount),
+            ],
             12,
         );
 
@@ -1004,7 +1035,7 @@ mod tests {
         let root =
             StructArray::new(FieldNames::from(["a"]), [struct_a], 3, root_validity).into_array();
 
-        let requested = [Stat::NullCount, Stat::Min, Stat::Max];
+        let requested = [agg(Stat::NullCount), agg(Stat::Min), agg(Stat::Max)];
         let mut node = StatsNode::build(root.dtype(), &requested, 1024);
         node.push_chunk(&root, &mut ctx)?;
 
@@ -1048,7 +1079,7 @@ mod tests {
         let outer = StructArray::new(FieldNames::from(["a"]), [inner], 3, Validity::NonNullable)
             .into_array();
 
-        let requested = [Stat::NullCount, Stat::Min, Stat::Max];
+        let requested = [agg(Stat::NullCount), agg(Stat::Min), agg(Stat::Max)];
         let mut node = StatsNode::build(outer.dtype(), &requested, 1024);
         node.push_chunk(&outer, &mut ctx)?;
 
@@ -1074,7 +1105,7 @@ mod tests {
 
         let acc = FileStatsAccumulator::new(
             &dtype,
-            Arc::from([Stat::NullCount, Stat::Min, Stat::Max]),
+            Arc::from([agg(Stat::NullCount), agg(Stat::Min), agg(Stat::Max)]),
             1024,
             &session,
             true,
@@ -1115,7 +1146,7 @@ mod tests {
         let session = array_session();
         let acc = FileStatsAccumulator::new(
             &dtype,
-            Arc::from([Stat::Min, Stat::Max]),
+            Arc::from([agg(Stat::Min), agg(Stat::Max)]),
             1024,
             &session,
             false,

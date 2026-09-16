@@ -339,7 +339,7 @@ pub fn footer_get_statistics(footer: &Footer, index: usize) -> Option<ColumnStat
 mod tests {
     use vortex::array::IntoArray;
     use vortex::array::arrays::StructArray;
-    use vortex::array::stats::PRUNING_STATS;
+    use vortex::array::stats::pruning_aggregate_fns;
     use vortex::array::validity::Validity;
     use vortex::buffer::ByteBufferMut;
     use vortex::buffer::buffer;
@@ -366,7 +366,7 @@ mod tests {
             let mut buf = ByteBufferMut::empty();
             let mut writer = SESSION
                 .write_options()
-                .with_file_statistics(PRUNING_STATS.to_vec())
+                .with_file_statistics(pruning_aggregate_fns())
                 .writer(&mut buf, outer.dtype().clone());
             writer.push(outer).await.unwrap();
             writer.finish().await.unwrap().footer().clone()
