@@ -338,8 +338,9 @@ pub fn copy_to_initialize_global(
 #[cfg(test)]
 mod tests {
     use vortex::array::IntoArray;
+    use vortex::array::aggregate_fn::AggregateFnRef;
     use vortex::array::arrays::StructArray;
-    use vortex::array::stats::PRUNING_STATS;
+    use vortex::array::stats::pruning_aggregate_fns;
     use vortex::array::validity::Validity;
     use vortex::buffer::ByteBufferMut;
     use vortex::buffer::buffer;
@@ -348,7 +349,7 @@ mod tests {
 
     /// Writes a one-column file and returns its summary, with `file_statistics` controlling which
     /// statistics the footer carries (empty means none at all).
-    fn write_summary(file_statistics: Vec<Stat>) -> WriteSummary {
+    fn write_summary(file_statistics: Vec<AggregateFnRef>) -> WriteSummary {
         RUNTIME.block_on(async {
             let array = StructArray::from_fields(&[("i", buffer![1u32, 2, 3].into_array())])
                 .unwrap()
@@ -365,7 +366,7 @@ mod tests {
 
     #[test]
     fn column_stats_out_of_range_is_an_error() {
-        let summary = write_summary(PRUNING_STATS.to_vec());
+        let summary = write_summary(pruning_aggregate_fns());
         assert!(column_stats_from_summary(&summary, 0, &[]).is_ok());
         assert!(column_stats_from_summary(&summary, 1, &[]).is_err());
     }
@@ -393,7 +394,7 @@ mod tests {
             let mut buf = ByteBufferMut::empty();
             let mut writer = SESSION
                 .write_options()
-                .with_file_statistics(PRUNING_STATS.to_vec())
+                .with_file_statistics(pruning_aggregate_fns())
                 .writer(&mut buf, outer.dtype().clone());
             writer.push(outer).await.unwrap();
             writer.finish().await.unwrap()

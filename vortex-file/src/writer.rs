@@ -19,13 +19,13 @@ use itertools::Itertools;
 use vortex_array::ArrayContext;
 use vortex_array::ArrayId;
 use vortex_array::ArrayRef;
+use vortex_array::aggregate_fn::AggregateFnRef;
 use vortex_array::dtype::DType;
 use vortex_array::dtype::FieldPath;
-use vortex_array::expr::stats::Stat;
 use vortex_array::iter::ArrayIterator;
 use vortex_array::iter::ArrayIteratorExt;
 use vortex_array::session::ArraySessionExt;
-use vortex_array::stats::PRUNING_STATS;
+use vortex_array::stats::pruning_aggregate_fns;
 use vortex_array::stream::ArrayStream;
 use vortex_array::stream::ArrayStreamAdapter;
 use vortex_array::stream::ArrayStreamExt;
@@ -84,7 +84,7 @@ pub struct VortexWriteOptions {
     buffered_bytes: BufferedBytesTracker,
     exclude_dtype: bool,
     max_variable_length_statistics_size: usize,
-    file_statistics: Vec<Stat>,
+    file_statistics: Vec<AggregateFnRef>,
     write_legacy_statistics: bool,
     metadata: HashMap<String, ByteBuffer>,
 }
@@ -107,7 +107,7 @@ impl VortexWriteOptions {
             buffered_bytes: BufferedBytesTracker::new(),
             session,
             exclude_dtype: false,
-            file_statistics: PRUNING_STATS.to_vec(),
+            file_statistics: pruning_aggregate_fns(),
             write_legacy_statistics: true,
             max_variable_length_statistics_size: 64,
             metadata: HashMap::default(),
@@ -159,7 +159,7 @@ impl VortexWriteOptions {
     /// Configure which statistics to compute at the file level.
     ///
     /// Pass an empty vector to omit file-level statistics.
-    pub fn with_file_statistics(mut self, file_statistics: Vec<Stat>) -> Self {
+    pub fn with_file_statistics(mut self, file_statistics: Vec<AggregateFnRef>) -> Self {
         self.file_statistics = file_statistics;
         self
     }

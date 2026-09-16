@@ -64,7 +64,7 @@ use vortex_array::scalar::ScalarValue;
 use vortex_array::scalar_fn::ScalarFnVTableExt;
 use vortex_array::scalar_fn::fns::pack::Pack;
 use vortex_array::scalar_fn::fns::pack::PackOptions;
-use vortex_array::stats::PRUNING_STATS;
+use vortex_array::stats::pruning_aggregate_fns;
 use vortex_array::stream::ArrayStreamAdapter;
 use vortex_array::stream::ArrayStreamExt;
 use vortex_array::validity::Validity;
@@ -1322,7 +1322,7 @@ async fn write_nullable_top_level_struct() -> VortexResult<()> {
     let mut buf = ByteBufferMut::empty();
     let summary = SESSION
         .write_options()
-        .with_file_statistics(PRUNING_STATS.to_vec())
+        .with_file_statistics(pruning_aggregate_fns())
         .write(&mut buf, array.to_array_stream())
         .await?;
 
@@ -1359,14 +1359,14 @@ async fn exclude_legacy_statistics_omits_legacy_but_keeps_nested() -> VortexResu
     let mut buf_with_legacy = ByteBufferMut::empty();
     SESSION
         .write_options()
-        .with_file_statistics(PRUNING_STATS.to_vec())
+        .with_file_statistics(pruning_aggregate_fns())
         .write(&mut buf_with_legacy, array.to_array_stream())
         .await?;
 
     let mut buf_without_legacy = ByteBufferMut::empty();
     let summary = SESSION
         .write_options()
-        .with_file_statistics(PRUNING_STATS.to_vec())
+        .with_file_statistics(pruning_aggregate_fns())
         .exclude_legacy_statistics()
         .write(&mut buf_without_legacy, array.to_array_stream())
         .await?;
@@ -2089,7 +2089,7 @@ async fn test_writer_with_statistics() -> VortexResult<()> {
     let mut buf = ByteBufferMut::empty();
     let mut writer = SESSION
         .write_options()
-        .with_file_statistics(PRUNING_STATS.to_vec())
+        .with_file_statistics(pruning_aggregate_fns())
         .writer(&mut buf, array.dtype().clone());
 
     writer.push(array).await?;
