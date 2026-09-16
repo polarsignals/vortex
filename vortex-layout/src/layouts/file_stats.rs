@@ -34,6 +34,7 @@ use vortex_buffer::BufferString;
 use vortex_buffer::ByteBuffer;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
+use vortex_error::vortex_panic;
 use vortex_session::VortexSession;
 
 use crate::layouts::zoned::MAX_IS_TRUNCATED;
@@ -48,12 +49,14 @@ pub fn accumulate_stats(
     stats: Arc<[Stat]>,
     max_variable_length_statistics_size: usize,
     session: &VortexSession,
+    write_legacy_stats: bool,
 ) -> (FileStatsAccumulator, SendableSequentialStream) {
     let accumulator = FileStatsAccumulator::new(
         stream.dtype(),
         stats,
         max_variable_length_statistics_size,
         session,
+        write_legacy_stats,
     );
     let stream = SequentialStreamAdapter::new(
         stream.dtype().clone(),
@@ -522,25 +525,47 @@ impl StatsNode {
         match self {
             Self::Skipped => Ok(()),
             Self::Leaf(acc) => acc.push_chunk(array, ctx),
-            Self::Struct {
-                children,
-                null_count,
-            } => {
-                // The struct's own `ArrayRef` already carries the validity needed to compute its
-                // null count, so we push it directly rather than building a synthetic array.
-                if let Some(null_count) = null_count {
-                    null_count.push_chunk(array, ctx)?;
-                }
+            Self::Struct { .. } => {
                 let struct_array = array.clone().execute::<StructArray>(ctx)?;
-                for ((_, child), field) in children
-                    .iter_mut()
-                    .zip_eq(struct_array.iter_unmasked_fields())
-                {
-                    child.push_chunk(field, ctx)?;
-                }
-                Ok(())
+                self.push_struct_chunk(array, &struct_array, ctx)
             }
         }
+    }
+
+    /// Pushes a chunk into a `Struct` node given an already-executed `StructArray` for `array`.
+    ///
+    /// Lets callers that already had to execute the chunk to a `StructArray` for another purpose
+    /// (e.g. [`FileStatsAccumulator::process`], which also feeds the legacy per-top-level-field
+    /// accumulators from the same execution) avoid doing so a second time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is not `Self::Struct`.
+    fn push_struct_chunk(
+        &mut self,
+        array: &ArrayRef,
+        struct_array: &StructArray,
+        ctx: &mut ExecutionCtx,
+    ) -> VortexResult<()> {
+        let Self::Struct {
+            children,
+            null_count,
+        } = self
+        else {
+            vortex_panic!("push_struct_chunk is only called on Struct nodes");
+        };
+        // The struct's own `ArrayRef` already carries the validity needed to compute its null
+        // count, so we push it directly rather than building a synthetic array.
+        if let Some(null_count) = null_count {
+            null_count.push_chunk(array, ctx)?;
+        }
+        for ((_, child), field) in children
+            .iter_mut()
+            .zip_eq(struct_array.iter_unmasked_fields())
+        {
+            child.push_chunk(field, ctx)?;
+        }
+        Ok(())
     }
 
     /// Appends this node's `StatsSet`s, in the same post-order as [`postorder_stats_layout`].
@@ -573,9 +598,17 @@ impl StatsNode {
 
 /// An array stream processor that computes aggregate statistics for every field, recursing into
 /// nested (possibly nullable) structs. See [`postorder_stats_layout`] for the entry ordering.
+///
+/// Alongside `root`'s post-order nested layout, this also maintains a `legacy` accumulation
+/// covering only the top-level struct fields (or the whole array, for a non-struct root),
+/// matching the layout file stats had before nested struct support: one entry per top-level
+/// field, with no recursion into nested structs. `legacy` is empty (and never accumulated into)
+/// when `write_legacy_stats` is `false`.
 #[derive(Clone)]
 pub struct FileStatsAccumulator {
     root: Arc<Mutex<StatsNode>>,
+    legacy: Arc<Mutex<Vec<StatsAccumulator>>>,
+    write_legacy_stats: bool,
     ctx: Arc<Mutex<ExecutionCtx>>,
 }
 
@@ -585,6 +618,7 @@ impl FileStatsAccumulator {
         stats: Arc<[Stat]>,
         max_variable_length_statistics_size: usize,
         session: &VortexSession,
+        write_legacy_stats: bool,
     ) -> Self {
         let root = Arc::new(Mutex::new(StatsNode::build(
             dtype,
@@ -592,8 +626,32 @@ impl FileStatsAccumulator {
             max_variable_length_statistics_size,
         )));
 
+        let legacy = Arc::new(Mutex::new(if write_legacy_stats {
+            match dtype.as_struct_fields_opt() {
+                Some(struct_fields) => struct_fields
+                    .fields()
+                    .map(|field_dtype| {
+                        StatsAccumulator::new(
+                            &field_dtype,
+                            &stats,
+                            max_variable_length_statistics_size,
+                        )
+                    })
+                    .collect(),
+                None => vec![StatsAccumulator::new(
+                    dtype,
+                    &stats,
+                    max_variable_length_statistics_size,
+                )],
+            }
+        } else {
+            Vec::new()
+        }));
+
         Self {
             root,
+            legacy,
+            write_legacy_stats,
             ctx: Arc::new(Mutex::new(session.create_execution_ctx())),
         }
     }
@@ -604,7 +662,27 @@ impl FileStatsAccumulator {
     ) -> VortexResult<(SequenceId, ArrayRef)> {
         let (sequence_id, chunk) = chunk?;
         let mut ctx = self.ctx.lock();
-        self.root.lock().push_chunk(&chunk, &mut ctx)?;
+        if chunk.dtype().is_struct() {
+            let struct_chunk = chunk.clone().execute::<StructArray>(&mut ctx)?;
+            if self.write_legacy_stats {
+                for (acc, field) in self
+                    .legacy
+                    .lock()
+                    .iter_mut()
+                    .zip_eq(struct_chunk.iter_unmasked_fields())
+                {
+                    acc.push_chunk(field, &mut ctx)?;
+                }
+            }
+            self.root
+                .lock()
+                .push_struct_chunk(&chunk, &struct_chunk, &mut ctx)?;
+        } else {
+            if self.write_legacy_stats {
+                self.legacy.lock()[0].push_chunk(&chunk, &mut ctx)?;
+            }
+            self.root.lock().push_chunk(&chunk, &mut ctx)?;
+        }
         Ok((sequence_id, chunk))
     }
 
@@ -616,6 +694,20 @@ impl FileStatsAccumulator {
             .collect_stats_sets(&mut ctx, &mut out)
             .vortex_expect("collect_stats_sets should not fail");
         out
+    }
+
+    /// Returns the legacy top-level-fields-only stats sets (one per top-level struct field, or a
+    /// single entry for a non-struct root dtype). Empty if `write_legacy_stats` was `false`.
+    pub fn legacy_stats_sets(&self) -> Vec<StatsSet> {
+        let mut ctx = self.ctx.lock();
+        self.legacy
+            .lock()
+            .iter_mut()
+            .map(|acc| {
+                acc.as_stats_set(&mut ctx)
+                    .vortex_expect("as_stats_set should not fail")
+            })
+            .collect()
     }
 }
 
@@ -969,6 +1061,70 @@ mod tests {
             stats_sets[1].get(Stat::NullCount).as_exact(),
             Some(ScalarValue::Primitive(PValue::U64(1)))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_stats_sets_covers_only_top_level_fields() -> VortexResult<()> {
+        // The legacy accumulation must have exactly one entry per top-level field, built against
+        // that field's own dtype without recursing into it, even though it's a nested struct.
+        let session = array_session();
+        let inner_dtype = DType::struct_([("b", i32_dtype())], Nullability::Nullable);
+        let dtype = DType::struct_([("a", inner_dtype)], Nullability::NonNullable);
+
+        let acc = FileStatsAccumulator::new(
+            &dtype,
+            Arc::from([Stat::NullCount, Stat::Min, Stat::Max]),
+            1024,
+            &session,
+            true,
+        );
+
+        let b = buffer![1i32, 2, 3].into_array();
+        let inner_validity =
+            Validity::Array(BoolArray::from_iter([true, false, true]).into_array());
+        let inner = StructArray::new(FieldNames::from(["b"]), [b], 3, inner_validity).into_array();
+        let outer = StructArray::new(FieldNames::from(["a"]), [inner], 3, Validity::NonNullable)
+            .into_array();
+
+        let (mut ptr, _eof) = SequenceId::root().split();
+        acc.process(Ok((ptr.advance(), outer)))?;
+
+        let legacy = acc.legacy_stats_sets();
+        assert_eq!(legacy.len(), 1);
+        assert_eq!(
+            legacy[0].get(Stat::NullCount).as_exact(),
+            Some(ScalarValue::from(1u64))
+        );
+        assert!(legacy[0].get(Stat::Min).as_exact().is_none());
+        assert!(legacy[0].get(Stat::Max).as_exact().is_none());
+        Ok(())
+    }
+
+    #[rstest]
+    #[case(DType::struct_([("a", i32_dtype())], Nullability::NonNullable), StructArray::new(FieldNames::from(["a"]), [buffer![1i32, 2, 3].into_array()], 3, Validity::NonNullable).into_array())]
+    #[case(i32_dtype(), buffer![1i32, 2, 3].into_array())]
+    fn write_legacy_stats_false_skips_legacy_accumulation(
+        #[case] dtype: DType,
+        #[case] chunk: ArrayRef,
+    ) -> VortexResult<()> {
+        // With `write_legacy_stats: false`, `legacy` stays empty for both struct and non-struct
+        // roots. This must not panic — `process` indexes into `legacy[0]` for a non-struct root
+        // and `zip_eq`s it against the struct's fields otherwise, both of which would panic if
+        // `legacy` were left empty without also gating those code paths.
+        let session = array_session();
+        let acc = FileStatsAccumulator::new(
+            &dtype,
+            Arc::from([Stat::Min, Stat::Max]),
+            1024,
+            &session,
+            false,
+        );
+
+        let (mut ptr, _eof) = SequenceId::root().split();
+        acc.process(Ok((ptr.advance(), chunk)))?;
+
+        assert!(acc.legacy_stats_sets().is_empty());
         Ok(())
     }
 }

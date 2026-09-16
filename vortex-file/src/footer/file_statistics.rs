@@ -32,7 +32,8 @@ use crate::flatbuffers::footer as fb;
 /// optimization and data exploration.
 #[derive(Clone, Debug)]
 pub struct FileStatistics {
-    /// An array of statistics sets, one for each field or column in the file.
+    /// An array of statistics sets, one for each field or column in the file, following the
+    /// post-order nested-struct layout.
     stats: Arc<[StatsSet]>,
     /// An array of `DType`s, one for each field or column in the file.
     dtypes: Arc<[DType]>,
@@ -40,6 +41,11 @@ pub struct FileStatistics {
     /// `dtypes`. For files written before nested field stats, every path has depth 1 (or is the
     /// root path, for a non-struct file dtype).
     paths: Arc<[FieldPath]>,
+    /// Legacy top-level-fields-only statistics sets, one per top-level struct field (or a single
+    /// entry for a non-struct root dtype). Only populated by the writer-facing constructors, for
+    /// serialization into `field_stats`; empty for instances built from [`Self::from_flatbuffer`],
+    /// which are never re-serialized.
+    legacy_stats: Arc<[StatsSet]>,
 }
 
 impl FileStatistics {
@@ -64,18 +70,25 @@ impl FileStatistics {
             stats,
             dtypes,
             paths,
+            legacy_stats: Arc::new([]),
         }
     }
 
-    /// Creates a new [`FileStatistics`] from the given statistics and file dtype.
+    /// Creates a new [`FileStatistics`] from the given nested statistics, legacy top-level-only
+    /// statistics, and file dtype.
     ///
     /// `stats` must follow the post-order nested-struct layout produced by
-    /// [`postorder_stats_layout`] for `file_dtype`.
+    /// [`postorder_stats_layout`] for `file_dtype`. `legacy_stats` must have one entry per
+    /// top-level struct field (or a single entry for a non-struct root dtype).
     ///
     /// # Panics
     ///
     /// Panics if the number of stats doesn't match the expected number based on the dtype.
-    pub fn new_with_dtype(stats: Arc<[StatsSet]>, file_dtype: &DType) -> Self {
+    pub fn new_with_dtype(
+        stats: Arc<[StatsSet]>,
+        legacy_stats: Arc<[StatsSet]>,
+        file_dtype: &DType,
+    ) -> Self {
         let layout = postorder_stats_layout(file_dtype);
         assert_eq!(
             stats.len(),
@@ -89,6 +102,7 @@ impl FileStatistics {
             stats,
             dtypes: dtypes.into(),
             paths: paths.into(),
+            legacy_stats,
         }
     }
 
@@ -98,10 +112,8 @@ impl FileStatistics {
         file_dtype: &DType,
         session: &VortexSession,
     ) -> VortexResult<Self> {
-        let field_stats = fb.field_stats().unwrap_or_default();
-        let mut array_stats: Vec<ArrayStats> = field_stats.iter().collect();
-
-        if fb.is_nested() {
+        if let Some(nested_field_stats) = fb.nested_field_stats() {
+            let array_stats: Vec<ArrayStats> = nested_field_stats.iter().collect();
             let layout = postorder_stats_layout(file_dtype);
             vortex_ensure_eq!(array_stats.len(), layout.len());
 
@@ -118,11 +130,15 @@ impl FileStatistics {
                 stats: stats_sets.into(),
                 dtypes: dtypes.into(),
                 paths: paths.into(),
+                legacy_stats: Arc::new([]),
             });
         }
 
         // Legacy (pre-nested-stats) layout: top-level struct fields only, or a single entry for a
         // non-struct root dtype.
+        let field_stats = fb.field_stats().unwrap_or_default();
+        let mut array_stats: Vec<ArrayStats> = field_stats.iter().collect();
+
         if let DType::Struct(struct_fields, _) = file_dtype {
             vortex_ensure_eq!(array_stats.len(), struct_fields.nfields());
 
@@ -145,6 +161,7 @@ impl FileStatistics {
                 stats: stats_sets,
                 dtypes,
                 paths,
+                legacy_stats: Arc::new([]),
             })
         } else {
             vortex_ensure_eq!(array_stats.len(), 1);
@@ -158,6 +175,7 @@ impl FileStatistics {
                 stats: Arc::new([stats_set]),
                 dtypes: Arc::new([file_dtype.clone()]),
                 paths: Arc::new([FieldPath::root()]),
+                legacy_stats: Arc::new([]),
             })
         }
     }
@@ -165,6 +183,17 @@ impl FileStatistics {
     /// Returns a reference to the statistics sets.
     pub fn stats_sets(&self) -> &Arc<[StatsSet]> {
         &self.stats
+    }
+
+    /// Returns `true` if there is no statistical information at all, in either the nested or the
+    /// legacy layout.
+    ///
+    /// These can disagree: a non-nullable struct field whose entire subtree is unsupported dtypes
+    /// (e.g. all-`Variant`) contributes no entries to the nested post-order layout (every leaf is
+    /// skipped, and there's no nullable struct along the way to emit an own entry), but still gets
+    /// a legacy top-level entry with a real `NullCount`, since that stat is dtype-agnostic.
+    pub fn is_empty(&self) -> bool {
+        self.stats.is_empty() && self.legacy_stats.is_empty()
     }
 
     /// Returns a reference to the data types.
@@ -214,17 +243,24 @@ impl WriteFlatBuffer for FileStatistics {
         fbb: &mut FlatBufferBuilder<'fb>,
     ) -> VortexResult<WIPOffset<Self::Target<'fb>>> {
         let field_stats = self
-            .stats_sets()
+            .legacy_stats
             .iter()
             .map(|s| s.write_flatbuffer(fbb))
             .collect::<VortexResult<Vec<_>>>()?;
         let field_stats = fbb.create_vector(field_stats.as_slice());
 
+        let nested_field_stats = self
+            .stats_sets()
+            .iter()
+            .map(|s| s.write_flatbuffer(fbb))
+            .collect::<VortexResult<Vec<_>>>()?;
+        let nested_field_stats = fbb.create_vector(nested_field_stats.as_slice());
+
         Ok(fb::FileStatistics::create(
             fbb,
             &fb::FileStatisticsArgs {
                 field_stats: Some(field_stats),
-                is_nested: true,
+                nested_field_stats: Some(nested_field_stats),
             },
         ))
     }
@@ -260,12 +296,20 @@ mod tests {
         let mut a_stats = StatsSet::default();
         a_stats.set(Stat::NullCount, Precision::exact(ScalarValue::from(1u64)));
 
-        let file_stats = FileStatistics::new_with_dtype(Arc::from([b_stats, a_stats]), &file_dtype);
+        // Legacy layout: one entry for top-level field "a" (a struct, so only NullCount survives).
+        let mut legacy_a_stats = StatsSet::default();
+        legacy_a_stats.set(Stat::NullCount, Precision::exact(ScalarValue::from(1u64)));
+
+        let file_stats = FileStatistics::new_with_dtype(
+            Arc::from([b_stats, a_stats]),
+            Arc::from([legacy_a_stats]),
+            &file_dtype,
+        );
 
         let bytes = file_stats.write_flatbuffer_bytes()?;
         let fb = flatbuffers::root::<fb::FileStatistics>(bytes.as_ref())
             .vortex_expect("valid flatbuffer");
-        assert!(fb.is_nested());
+        assert!(fb.nested_field_stats().is_some());
 
         let read_back = FileStatistics::from_flatbuffer(&fb, &file_dtype, &session)?;
 
@@ -289,8 +333,8 @@ mod tests {
 
     #[test]
     fn legacy_non_nested_footer_still_parses() -> VortexResult<()> {
-        // Simulates a footer written before nested field stats existed: `is_nested` is absent
-        // (defaults to false), and `field_stats` holds one entry per top-level struct field.
+        // Simulates a footer written before nested field stats existed: `nested_field_stats` is
+        // absent, and `field_stats` holds one entry per top-level struct field.
         let session = array_session();
         let file_dtype = DType::struct_([("col", i32_dtype())], Nullability::NonNullable);
 
@@ -304,14 +348,14 @@ mod tests {
             &mut fbb,
             &fb::FileStatisticsArgs {
                 field_stats: Some(field_stats),
-                is_nested: false,
+                nested_field_stats: None,
             },
         );
         fbb.finish_minimal(root);
         let bytes = fbb.finished_data().to_vec();
 
         let fb = flatbuffers::root::<fb::FileStatistics>(&bytes).vortex_expect("valid flatbuffer");
-        assert!(!fb.is_nested());
+        assert!(fb.nested_field_stats().is_none());
 
         let read_back = FileStatistics::from_flatbuffer(&fb, &file_dtype, &session)?;
         let (col, _) = read_back
@@ -320,5 +364,63 @@ mod tests {
         assert_eq!(col.get(Stat::Min).as_exact(), Some(ScalarValue::from(7i32)));
 
         Ok(())
+    }
+
+    #[test]
+    fn writer_still_emits_legacy_field_stats_matching_top_level_field_count() -> VortexResult<()> {
+        // Regression test: an old reader (pre-nested-stats) only ever looks at `field_stats` and
+        // requires its length to match the number of top-level struct fields. A nested/nullable
+        // struct schema's post-order layout has a different length, so `field_stats` must keep
+        // carrying the legacy top-level-only shape, not the nested one.
+        let inner = DType::struct_([("b", i32_dtype())], Nullability::Nullable);
+        let file_dtype =
+            DType::struct_([("a", inner), ("c", i32_dtype())], Nullability::NonNullable);
+        let struct_fields = file_dtype
+            .as_struct_fields_opt()
+            .vortex_expect("file_dtype is a struct");
+
+        // Nested (post-order) layout: [a.b, a, c] - 3 entries, differs from the 2 top-level fields.
+        let nested_stats: Arc<[StatsSet]> = Arc::from([
+            StatsSet::default(),
+            StatsSet::default(),
+            StatsSet::default(),
+        ]);
+        // Legacy layout: one entry per top-level field ("a", "c").
+        let legacy_stats: Arc<[StatsSet]> = Arc::from([StatsSet::default(), StatsSet::default()]);
+
+        let file_stats = FileStatistics::new_with_dtype(nested_stats, legacy_stats, &file_dtype);
+        let bytes = file_stats.write_flatbuffer_bytes()?;
+        let fb = flatbuffers::root::<fb::FileStatistics>(bytes.as_ref())
+            .vortex_expect("valid flatbuffer");
+
+        let field_stats_len = fb.field_stats().map_or(0, |field_stats| field_stats.len());
+        assert_eq!(field_stats_len, struct_fields.nfields());
+
+        Ok(())
+    }
+
+    #[test]
+    fn is_empty_considers_legacy_stats_too() {
+        // Regression test: the nested (post-order) layout can be empty while the legacy layout
+        // still carries real content, e.g. a non-nullable struct field whose entire subtree is
+        // unsupported dtypes contributes no nested entries, but still gets a legacy NullCount
+        // (dtype-agnostic). `is_empty` must not report "nothing to write" in that case, or the
+        // caller (the footer serializer) would silently drop the legacy stats too.
+        let mut legacy = StatsSet::default();
+        legacy.set(Stat::NullCount, Precision::exact(ScalarValue::from(0u64)));
+
+        // A non-nullable struct field whose only child is an unsupported dtype (`Variant`)
+        // contributes zero entries to the nested post-order layout: the leaf is skipped, and the
+        // struct itself is non-nullable so it gets no own entry either.
+        let file_dtype = DType::struct_(
+            [("a", DType::Variant(Nullability::NonNullable))],
+            Nullability::NonNullable,
+        );
+        assert_eq!(postorder_stats_layout(&file_dtype), Vec::new());
+
+        let file_stats =
+            FileStatistics::new_with_dtype(Arc::from([]), Arc::from([legacy]), &file_dtype);
+
+        assert!(!file_stats.is_empty());
     }
 }

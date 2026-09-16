@@ -11,6 +11,7 @@ use url::Url;
 use vortex::array::VortexSessionExecute as _;
 use vortex::array::arrays::struct_::StructArrayExt as _;
 use vortex::dtype::DType;
+use vortex::dtype::FieldPath;
 use vortex::error::VortexExpect;
 use vortex::error::VortexResult;
 use vortex::error::vortex_panic;
@@ -274,16 +275,12 @@ pub fn reader_get_statistics(
         .as_any()
         .downcast_ref::<FileStatsLayoutReader>()?;
 
-    let DType::Struct(fields, _) = &file.reader.dtype() else {
-        return None;
-    };
-    let index = fields.find(column)?;
-    let stats_sets = reader.file_stats().stats_sets();
+    let (stats, dtype) = reader
+        .file_stats()
+        .get_by_path(&FieldPath::from_name(column))?;
 
-    let dtype = fields.field_by_index(index)?;
-
-    let stats = ColumnStatisticsAggregate::new(stats_sets.get(index)?);
-    match ColumnStatistics::try_from(stats, dtype) {
+    let stats = ColumnStatisticsAggregate::new(stats);
+    match ColumnStatistics::try_from(stats, dtype.clone()) {
         Ok(stats) => Some(stats),
         Err(e) => vortex_panic!(e),
     }
@@ -328,12 +325,56 @@ pub fn footer_get_statistics(footer: &Footer, index: usize) -> Option<ColumnStat
     let DType::Struct(fields, _) = footer.dtype() else {
         return None;
     };
+    let name = fields.names().get(index)?;
     let stats = footer.statistics()?;
-    let dtype = fields.field_by_index(index)?;
-    let stats = stats.stats_sets().get(index)?;
+    let (stats, dtype) = stats.get_by_path(&FieldPath::from_name(name.clone()))?;
     let stats = ColumnStatisticsAggregate::new(stats);
-    match ColumnStatistics::try_from(stats, dtype) {
+    match ColumnStatistics::try_from(stats, dtype.clone()) {
         Ok(stats) => Some(stats),
         Err(e) => vortex_panic!(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vortex::array::IntoArray;
+    use vortex::array::arrays::StructArray;
+    use vortex::array::stats::PRUNING_STATS;
+    use vortex::array::validity::Validity;
+    use vortex::buffer::ByteBufferMut;
+    use vortex::buffer::buffer;
+    use vortex::file::WriteOptionsSessionExt;
+
+    use super::*;
+    use crate::RUNTIME;
+    use crate::SESSION;
+
+    #[test]
+    fn footer_get_statistics_resolves_by_name_past_a_nullable_struct_field() {
+        // Regression test: a nullable top-level struct field ("s") contributes both a `s.b` entry
+        // and a trailing entry for its own null count to the nested (post-order) stats layout, so
+        // that layout has one more entry than there are top-level fields. Resolving a later
+        // top-level column ("c", index 1) by flat position into that layout would silently return
+        // `s`'s own null-count-only entry (which has no Min) instead of `c`'s stats.
+        let footer = RUNTIME.block_on(async {
+            let b = buffer![10i32, 20, 30].into_array();
+            let inner = StructArray::new(["b"].into(), [b], 3, Validity::AllValid).into_array();
+            let c = buffer![7u32, 8, 9].into_array();
+            let outer = StructArray::new(["s", "c"].into(), [inner, c], 3, Validity::NonNullable)
+                .into_array();
+
+            let mut buf = ByteBufferMut::empty();
+            let mut writer = SESSION
+                .write_options()
+                .with_file_statistics(PRUNING_STATS.to_vec())
+                .writer(&mut buf, outer.dtype().clone());
+            writer.push(outer).await.unwrap();
+            writer.finish().await.unwrap().footer().clone()
+        });
+
+        let stats =
+            footer_get_statistics(&footer, 1).expect("stats for top-level column 1 (\"c\")");
+        assert!(stats.min.is_some());
+        assert!(stats.max.is_some());
     }
 }

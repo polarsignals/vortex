@@ -1343,6 +1343,55 @@ async fn write_nullable_top_level_struct() -> VortexResult<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn exclude_legacy_statistics_omits_legacy_but_keeps_nested() -> VortexResult<()> {
+    let inner = StructArray::try_new(
+        ["b"].into(),
+        vec![PrimitiveArray::from_option_iter([Some(1i32), None, Some(3)]).into_array()],
+        3,
+        Validity::NonNullable,
+    )?
+    .into_array();
+    let c = PrimitiveArray::from_iter([4i32, 5, 6]).into_array();
+    let array = StructArray::try_new(["a", "c"].into(), vec![inner, c], 3, Validity::NonNullable)?
+        .into_array();
+
+    let mut buf_with_legacy = ByteBufferMut::empty();
+    SESSION
+        .write_options()
+        .with_file_statistics(PRUNING_STATS.to_vec())
+        .write(&mut buf_with_legacy, array.to_array_stream())
+        .await?;
+
+    let mut buf_without_legacy = ByteBufferMut::empty();
+    let summary = SESSION
+        .write_options()
+        .with_file_statistics(PRUNING_STATS.to_vec())
+        .exclude_legacy_statistics()
+        .write(&mut buf_without_legacy, array.to_array_stream())
+        .await?;
+
+    assert!(
+        buf_without_legacy.len() < buf_with_legacy.len(),
+        "excluding legacy statistics should shrink the footer"
+    );
+
+    // Nested stats should still be fully populated and resolvable by path.
+    let stats = summary
+        .footer()
+        .statistics()
+        .expect("file statistics should be present");
+    let (b_stats, _) = stats
+        .get_by_path(&field_path!(a.b))
+        .expect("nested field stats should still resolve by path");
+    assert_eq!(
+        b_stats.get(Stat::NullCount).as_exact(),
+        Some(ScalarValue::from(1u64))
+    );
+
+    Ok(())
+}
+
 async fn round_trip(
     array: &ArrayRef,
     f: impl FnOnce(ScanBuilder<ArrayRef>) -> VortexResult<ScanBuilder<ArrayRef>>,

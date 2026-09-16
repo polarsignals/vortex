@@ -85,6 +85,7 @@ pub struct VortexWriteOptions {
     exclude_dtype: bool,
     max_variable_length_statistics_size: usize,
     file_statistics: Vec<Stat>,
+    write_legacy_statistics: bool,
     metadata: HashMap<String, ByteBuffer>,
 }
 
@@ -107,6 +108,7 @@ impl VortexWriteOptions {
             session,
             exclude_dtype: false,
             file_statistics: PRUNING_STATS.to_vec(),
+            write_legacy_statistics: true,
             max_variable_length_statistics_size: 64,
             metadata: HashMap::default(),
         }
@@ -159,6 +161,18 @@ impl VortexWriteOptions {
     /// Pass an empty vector to omit file-level statistics.
     pub fn with_file_statistics(mut self, file_statistics: Vec<Stat>) -> Self {
         self.file_statistics = file_statistics;
+        self
+    }
+
+    /// Exclude legacy top-level-only statistics (`field_stats`) from the file, computing and
+    /// writing only the full nested post-order statistics (`nested_field_stats`).
+    ///
+    /// Readers built before nested file stats existed only look at `field_stats` and validate its
+    /// length against the number of top-level struct fields; omitting it means those readers find
+    /// no usable statistics in this file (though they can still read the data). Only use this if
+    /// you control every reader of the resulting files and don't need that compatibility.
+    pub fn exclude_legacy_statistics(mut self) -> Self {
+        self.write_legacy_statistics = false;
         self
     }
 
@@ -277,6 +291,7 @@ impl VortexWriteOptions {
             self.file_statistics.clone().into(),
             self.max_variable_length_statistics_size,
             &self.session,
+            self.write_legacy_statistics,
         );
 
         // First, write the magic bytes.
@@ -324,6 +339,7 @@ impl VortexWriteOptions {
         } else {
             Some(FileStatistics::new_with_dtype(
                 file_stats.stats_sets().into(),
+                file_stats.legacy_stats_sets().into(),
                 &dtype,
             ))
         };
