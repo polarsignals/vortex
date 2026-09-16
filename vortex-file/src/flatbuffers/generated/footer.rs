@@ -816,7 +816,7 @@ impl<'a> ::flatbuffers::Follow<'a> for FileStatistics<'a> {
 
 impl<'a> FileStatistics<'a> {
   pub const VT_FIELD_STATS: ::flatbuffers::VOffsetT = 4;
-  pub const VT_IS_NESTED: ::flatbuffers::VOffsetT = 6;
+  pub const VT_NESTED_FIELD_STATS: ::flatbuffers::VOffsetT = 6;
 
   #[inline]
   pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -828,18 +828,19 @@ impl<'a> FileStatistics<'a> {
     args: &'args FileStatisticsArgs<'args>
   ) -> ::flatbuffers::WIPOffset<FileStatistics<'bldr>> {
     let mut builder = FileStatisticsBuilder::new(_fbb);
+    if let Some(x) = args.nested_field_stats { builder.add_nested_field_stats(x); }
     if let Some(x) = args.field_stats { builder.add_field_stats(x); }
-    builder.add_is_nested(args.is_nested);
     builder.finish()
   }
 
 
-  /// Statistics for each field in the root schema. If the root schema is not a struct, there will
-  /// be a single entry in this array.
+  /// Statistics for each top-level field in the root schema, in schema order. If the root schema
+  /// is not a struct, there will be a single entry in this array. Does not recurse into nested
+  /// struct fields; see `nested_field_stats` for that.
   ///
-  /// When `is_nested` is true, entries follow a post-order walk of the root `DType` tree: each
-  /// leaf field gets an entry, and each nullable struct additionally gets a trailing null-count
-  /// entry inserted after its children's entries.
+  /// Kept in this legacy shape for backward compatibility with readers that predate
+  /// `nested_field_stats`, which strictly validate this array's length against the number of
+  /// top-level struct fields.
   #[inline]
   pub fn field_stats(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ArrayStats<'a>>>> {
     // Safety:
@@ -847,15 +848,19 @@ impl<'a> FileStatistics<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ArrayStats>>>>(FileStatistics::VT_FIELD_STATS, None)}
   }
-  /// Whether `field_stats` follows the post-order nested-struct layout (true) or the legacy
-  /// top-level-fields-only layout (false). Defaults to false for backward compatibility with
-  /// files written before nested field stats were supported.
+  /// Statistics following a post-order walk of the root `DType` tree: each leaf field gets an
+  /// entry, and each nullable struct additionally gets a trailing null-count entry inserted
+  /// after its children's entries.
+  ///
+  /// Readers that know about this field should prefer it over `field_stats` when present. It is
+  /// absent for files written before nested file stats were supported, and readers that don't
+  /// know about it fall back to `field_stats`'s legacy top-level-fields-only layout.
   #[inline]
-  pub fn is_nested(&self) -> bool {
+  pub fn nested_field_stats(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ArrayStats<'a>>>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<bool>(FileStatistics::VT_IS_NESTED, Some(false)).unwrap()}
+    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ArrayStats>>>>(FileStatistics::VT_NESTED_FIELD_STATS, None)}
   }
 }
 
@@ -866,21 +871,21 @@ impl ::flatbuffers::Verifiable for FileStatistics<'_> {
   ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
     v.visit_table(pos)?
      .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ArrayStats>>>>("field_stats", Self::VT_FIELD_STATS, false)?
-     .visit_field::<bool>("is_nested", Self::VT_IS_NESTED, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ArrayStats>>>>("nested_field_stats", Self::VT_NESTED_FIELD_STATS, false)?
      .finish();
     Ok(())
   }
 }
 pub struct FileStatisticsArgs<'a> {
     pub field_stats: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ArrayStats<'a>>>>>,
-    pub is_nested: bool,
+    pub nested_field_stats: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ArrayStats<'a>>>>>,
 }
 impl<'a> Default for FileStatisticsArgs<'a> {
   #[inline]
   fn default() -> Self {
     FileStatisticsArgs {
       field_stats: None,
-      is_nested: false,
+      nested_field_stats: None,
     }
   }
 }
@@ -895,8 +900,8 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> FileStatisticsBuilder<'a, 'b,
     self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(FileStatistics::VT_FIELD_STATS, field_stats);
   }
   #[inline]
-  pub fn add_is_nested(&mut self, is_nested: bool) {
-    self.fbb_.push_slot::<bool>(FileStatistics::VT_IS_NESTED, is_nested, false);
+  pub fn add_nested_field_stats(&mut self, nested_field_stats: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ArrayStats<'b >>>>) {
+    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(FileStatistics::VT_NESTED_FIELD_STATS, nested_field_stats);
   }
   #[inline]
   pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> FileStatisticsBuilder<'a, 'b, A> {
@@ -917,7 +922,7 @@ impl ::core::fmt::Debug for FileStatistics<'_> {
   fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
     let mut ds = f.debug_struct("FileStatistics");
       ds.field("field_stats", &self.field_stats());
-      ds.field("is_nested", &self.is_nested());
+      ds.field("nested_field_stats", &self.nested_field_stats());
       ds.finish()
   }
 }
