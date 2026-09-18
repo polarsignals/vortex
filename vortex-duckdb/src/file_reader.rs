@@ -338,16 +338,30 @@ pub fn footer_get_statistics(footer: &Footer, index: usize) -> Option<ColumnStat
 #[cfg(test)]
 mod tests {
     use vortex::array::IntoArray;
+    use vortex::array::aggregate_fn::AggregateFnRef;
     use vortex::array::arrays::StructArray;
-    use vortex::array::stats::pruning_aggregate_fns;
     use vortex::array::validity::Validity;
     use vortex::buffer::ByteBufferMut;
     use vortex::buffer::buffer;
+    use vortex::expr::stats::Stat;
     use vortex::file::WriteOptionsSessionExt;
 
     use super::*;
     use crate::RUNTIME;
     use crate::SESSION;
+
+    fn pruning_aggregate_fns() -> Vec<AggregateFnRef> {
+        [
+            Stat::Min,
+            Stat::Max,
+            Stat::Sum,
+            Stat::NullCount,
+            Stat::NaNCount,
+        ]
+        .into_iter()
+        .filter_map(|stat| stat.aggregate_fn())
+        .collect()
+    }
 
     #[test]
     fn footer_get_statistics_resolves_by_name_past_a_nullable_struct_field() {

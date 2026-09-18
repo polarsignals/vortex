@@ -80,7 +80,7 @@ impl FileStatsBinder<'_> {
     fn stat_ref(&self, field_path: &FieldPath, stat: Stat) -> Option<BoundExpression> {
         let (field_stats, field_dtype) = self.file_stats.get_by_path(field_path)?;
 
-        let stat_value = field_stats.get(stat).as_exact()?;
+        let stat_value = field_stats.get(stat).into_inner()?;
         let stat_dtype = stat.dtype(field_dtype)?;
         let stat_scalar = Scalar::try_new(stat_dtype, Some(stat_value)).ok()?;
 

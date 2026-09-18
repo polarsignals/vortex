@@ -31,26 +31,7 @@ pub use array::*;
 pub use session::*;
 use vortex_error::VortexExpect;
 
-use crate::aggregate_fn::AggregateFnRef;
 use crate::expr::stats::Stat;
-
-/// Statistics that are used for pruning files (i.e., we want to ensure they are computed when compressing/writing).
-/// Sum is included for boolean arrays.
-pub const PRUNING_STATS: &[Stat] = &[
-    Stat::Min,
-    Stat::Max,
-    Stat::Sum,
-    Stat::NullCount,
-    Stat::NaNCount,
-];
-
-/// [`PRUNING_STATS`], converted to their aggregate function form.
-pub fn pruning_aggregate_fns() -> Vec<AggregateFnRef> {
-    PRUNING_STATS
-        .iter()
-        .filter_map(|stat| stat.aggregate_fn())
-        .collect()
-}
 
 pub fn as_stat_bitset_bytes(stats: &[Stat]) -> Vec<u8> {
     let max_stat = u8::from(last::<Stat>().vortex_expect("last stat")) as usize + 1;

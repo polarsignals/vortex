@@ -340,12 +340,24 @@ mod tests {
     use vortex::array::IntoArray;
     use vortex::array::aggregate_fn::AggregateFnRef;
     use vortex::array::arrays::StructArray;
-    use vortex::array::stats::pruning_aggregate_fns;
     use vortex::array::validity::Validity;
     use vortex::buffer::ByteBufferMut;
     use vortex::buffer::buffer;
 
     use super::*;
+
+    fn pruning_aggregate_fns() -> Vec<AggregateFnRef> {
+        [
+            Stat::Min,
+            Stat::Max,
+            Stat::Sum,
+            Stat::NullCount,
+            Stat::NaNCount,
+        ]
+        .into_iter()
+        .filter_map(|stat| stat.aggregate_fn())
+        .collect()
+    }
 
     /// Writes a one-column file and returns its summary, with `file_statistics` controlling which
     /// statistics the footer carries (empty means none at all).
