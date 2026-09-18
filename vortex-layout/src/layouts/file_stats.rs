@@ -124,20 +124,13 @@ impl StatsAccumulator {
         let mut stats_set = StatsSet::default();
 
         for (aggregate_fn, accumulator) in &self.aggregates {
-            let Some(stat) = file_stat_for_aggregate_fn(aggregate_fn) else {
+            let Some((stat, satisfaction)) = Stat::from_aggregate_fn_partial(aggregate_fn) else {
                 continue;
             };
             let Some(v) = accumulator.final_scalar()?.into_value() else {
                 continue;
             };
-
-            // `BoundedMax`/`BoundedMin` (this module's own default variable-length aggregates)
-            // can never exactly satisfy a request for the plain `Max`/`Min` they stand in for, so
-            // their result is always recorded as an approximate bound.
-            let requested = stat
-                .aggregate_fn()
-                .vortex_expect("a stat resolved from an aggregate fn has its own aggregate fn");
-            let precision = if aggregate_fn.can_satisfy(&requested).is_exact() {
+            let precision = if satisfaction.is_exact() {
                 Precision::exact(v)
             } else {
                 Precision::inexact(v)
@@ -185,21 +178,6 @@ fn default_pruning_aggregate_fns(dtype: &DType, max_bytes: NonZeroUsize) -> Vec<
 fn default_max_variable_length_statistics_size() -> NonZeroUsize {
     // SAFETY: 64 is non-zero.
     unsafe { NonZeroUsize::new_unchecked(64) }
-}
-
-/// Maps `aggregate_fn` to the legacy [`Stat`] slot its result belongs in.
-///
-/// Unlike [`Stat::from_aggregate_fn`], this also recognizes [`BoundedMax`]/[`BoundedMin`] — this
-/// module's own default variable-length aggregates — which fill the `Max`/`Min` slots as an
-/// approximate bound rather than an exact value.
-fn file_stat_for_aggregate_fn(aggregate_fn: &AggregateFnRef) -> Option<Stat> {
-    if aggregate_fn.is::<BoundedMax>() {
-        return Some(Stat::Max);
-    }
-    if aggregate_fn.is::<BoundedMin>() {
-        return Some(Stat::Min);
-    }
-    Stat::from_aggregate_fn(aggregate_fn)
 }
 
 /// Computes the post-order sequence of `(FieldPath, DType)` entries that file-level statistics
@@ -807,7 +785,11 @@ mod tests {
 
         let acc = FileStatsAccumulator::new(
             &dtype,
-            Some(Arc::from([agg(Stat::NullCount), agg(Stat::Min), agg(Stat::Max)])),
+            Some(Arc::from([
+                agg(Stat::NullCount),
+                agg(Stat::Min),
+                agg(Stat::Max),
+            ])),
             1024,
             &session,
             true,
