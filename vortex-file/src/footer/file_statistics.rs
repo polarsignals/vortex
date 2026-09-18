@@ -343,6 +343,36 @@ mod tests {
     }
 
     #[test]
+    fn get_by_path_resolves_a_later_sibling_past_a_nullable_struct_field() {
+        // Regression test: a nullable struct field ("s") contributes both an `s.b` entry and a
+        // trailing entry for its own null count to the nested (post-order) layout, so that layout
+        // has one more entry (3) than there are top-level fields (2: "s", "c"). Resolving the
+        // later top-level field "c" by path must not be thrown off by "s"'s extra own-entry.
+        let s_dtype = DType::struct_([("b", i32_dtype())], Nullability::Nullable);
+        let file_dtype = DType::struct_(
+            [("s", s_dtype), ("c", i32_dtype())],
+            Nullability::NonNullable,
+        );
+
+        // Post-order layout: [s.b, s, c].
+        let mut c_stats = StatsSet::default();
+        c_stats.set(Stat::Min, Precision::exact(ScalarValue::from(42i32)));
+        let mut s_own_stats = StatsSet::default();
+        s_own_stats.set(Stat::NullCount, Precision::exact(ScalarValue::from(0u64)));
+
+        let file_stats = FileStatistics::new_with_dtype(
+            Arc::from([StatsSet::default(), s_own_stats, c_stats]),
+            Arc::from([StatsSet::default(), StatsSet::default()]),
+            &file_dtype,
+        );
+
+        let (c, _) = file_stats
+            .get_by_path(&FieldPath::from_name("c"))
+            .expect("c stats");
+        assert_eq!(c.get(Stat::Min).as_exact(), Some(ScalarValue::from(42i32)));
+    }
+
+    #[test]
     fn legacy_non_nested_footer_still_parses() -> VortexResult<()> {
         // Simulates a footer written before nested field stats existed: `nested_field_stats` is
         // absent, and `field_stats` holds one entry per top-level struct field.
