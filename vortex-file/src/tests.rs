@@ -15,6 +15,7 @@ use rstest::rstest;
 use vortex_array::ArrayRef;
 use vortex_array::IntoArray;
 use vortex_array::VortexSessionExecute;
+use vortex_array::aggregate_fn::AggregateFnRef;
 use vortex_array::array_session;
 use vortex_array::arrays::BoolArray;
 use vortex_array::arrays::ChunkedArray;
@@ -64,7 +65,6 @@ use vortex_array::scalar::ScalarValue;
 use vortex_array::scalar_fn::ScalarFnVTableExt;
 use vortex_array::scalar_fn::fns::pack::Pack;
 use vortex_array::scalar_fn::fns::pack::PackOptions;
-use vortex_array::stats::pruning_aggregate_fns;
 use vortex_array::stream::ArrayStreamAdapter;
 use vortex_array::stream::ArrayStreamExt;
 use vortex_array::validity::Validity;
@@ -114,6 +114,19 @@ static SESSION: LazyLock<VortexSession> = LazyLock::new(|| {
 
     session
 });
+
+fn pruning_aggregate_fns() -> Vec<AggregateFnRef> {
+    [
+        Stat::Min,
+        Stat::Max,
+        Stat::Sum,
+        Stat::NullCount,
+        Stat::NaNCount,
+    ]
+    .into_iter()
+    .filter_map(|stat| stat.aggregate_fn())
+    .collect()
+}
 
 fn strict_sorted(indices: Buffer<u64>) -> StrictSortedBuffer<u64> {
     StrictSortedBuffer::try_new(indices).expect("test indices should be strictly increasing")
