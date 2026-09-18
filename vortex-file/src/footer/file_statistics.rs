@@ -22,6 +22,7 @@ use vortex_error::VortexResult;
 use vortex_error::vortex_ensure_eq;
 use vortex_layout::layouts::file_stats::postorder_stats_layout;
 use vortex_session::VortexSession;
+use vortex_utils::aliases::hash_map::HashMap;
 
 use crate::flatbuffers::footer as fb;
 
@@ -41,6 +42,9 @@ pub struct FileStatistics {
     /// `dtypes`. For files written before nested field stats, every path has depth 1 (or is the
     /// root path, for a non-struct file dtype).
     paths: Arc<[FieldPath]>,
+    /// Maps each entry in `paths` to its index, so [`Self::get_by_path`] doesn't need to scan
+    /// `paths` linearly.
+    path_index: Arc<HashMap<FieldPath, usize>>,
     /// Legacy top-level-fields-only statistics sets, one per top-level struct field (or a single
     /// entry for a non-struct root dtype). Only populated by the writer-facing constructors, for
     /// serialization into `field_stats`; empty for instances built from [`Self::from_flatbuffer`],
@@ -49,6 +53,29 @@ pub struct FileStatistics {
 }
 
 impl FileStatistics {
+    /// Builds `path_index` from `paths` and assembles the final struct. The single place that
+    /// constructs a [`FileStatistics`], so `path_index` can't drift out of sync with `paths`.
+    fn from_parts(
+        stats: Arc<[StatsSet]>,
+        dtypes: Arc<[DType]>,
+        paths: Arc<[FieldPath]>,
+        legacy_stats: Arc<[StatsSet]>,
+    ) -> Self {
+        let path_index = paths
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(i, p)| (p, i))
+            .collect();
+        Self {
+            stats,
+            dtypes,
+            paths,
+            path_index: Arc::new(path_index),
+            legacy_stats,
+        }
+    }
+
     /// Creates a new [`FileStatistics`] from the given statistics, data types, and field paths.
     ///
     /// # Panics
@@ -66,12 +93,7 @@ impl FileStatistics {
             "stats and paths must have the same length"
         );
 
-        Self {
-            stats,
-            dtypes,
-            paths,
-            legacy_stats: Arc::new([]),
-        }
+        Self::from_parts(stats, dtypes, paths, Arc::new([]))
     }
 
     /// Creates a new [`FileStatistics`] from the given nested statistics, legacy top-level-only
@@ -98,12 +120,7 @@ impl FileStatistics {
 
         let (paths, dtypes): (Vec<FieldPath>, Vec<DType>) = layout.into_iter().unzip();
 
-        Self {
-            stats,
-            dtypes: dtypes.into(),
-            paths: paths.into(),
-            legacy_stats,
-        }
+        Self::from_parts(stats, dtypes.into(), paths.into(), legacy_stats)
     }
 
     /// Creates [`FileStatistics`] from a flatbuffers [`fb::FileStatistics<'a>`].
@@ -126,12 +143,12 @@ impl FileStatistics {
                 paths.push(path);
             }
 
-            return Ok(Self {
-                stats: stats_sets.into(),
-                dtypes: dtypes.into(),
-                paths: paths.into(),
-                legacy_stats: Arc::new([]),
-            });
+            return Ok(Self::from_parts(
+                stats_sets.into(),
+                dtypes.into(),
+                paths.into(),
+                Arc::new([]),
+            ));
         }
 
         // Legacy (pre-nested-stats) layout: top-level struct fields only, or a single entry for a
@@ -157,12 +174,7 @@ impl FileStatistics {
                 .map(|name| FieldPath::from_name(name.clone()))
                 .collect();
 
-            Ok(Self {
-                stats: stats_sets,
-                dtypes,
-                paths,
-                legacy_stats: Arc::new([]),
-            })
+            Ok(Self::from_parts(stats_sets, dtypes, paths, Arc::new([])))
         } else {
             vortex_ensure_eq!(array_stats.len(), 1);
 
@@ -171,12 +183,12 @@ impl FileStatistics {
                 .vortex_expect("we just checked that there was 1 field");
             let stats_set = StatsSet::from_flatbuffer(&array_stat, file_dtype, session)?;
 
-            Ok(Self {
-                stats: Arc::new([stats_set]),
-                dtypes: Arc::new([file_dtype.clone()]),
-                paths: Arc::new([FieldPath::root()]),
-                legacy_stats: Arc::new([]),
-            })
+            Ok(Self::from_parts(
+                Arc::new([stats_set]),
+                Arc::new([file_dtype.clone()]),
+                Arc::new([FieldPath::root()]),
+                Arc::new([]),
+            ))
         }
     }
 
@@ -217,10 +229,9 @@ impl FileStatistics {
 
     /// Returns the statistics and data type for the field at the given path, if present.
     pub fn get_by_path(&self, path: &FieldPath) -> Option<(&StatsSet, &DType)> {
-        self.paths
-            .iter()
-            .position(|p| p == path)
-            .map(|idx| (&self.stats[idx], &self.dtypes[idx]))
+        self.path_index
+            .get(path)
+            .map(|&idx| (&self.stats[idx], &self.dtypes[idx]))
     }
 }
 
