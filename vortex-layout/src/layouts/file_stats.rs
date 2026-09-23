@@ -28,7 +28,7 @@ use vortex_array::aggregate_fn::fns::sum::Sum;
 use vortex_array::arrays::StructArray;
 use vortex_array::arrays::struct_::StructArrayExt;
 use vortex_array::dtype::DType;
-use vortex_array::dtype::FieldName;
+use vortex_array::dtype::Field;
 use vortex_array::dtype::FieldPath;
 use vortex_array::dtype::Nullability;
 use vortex_array::expr::stats::Precision;
@@ -216,15 +216,22 @@ fn postorder_stats_layout_into(dtype: &DType, path: FieldPath, out: &mut Vec<(Fi
 
 /// A node in the tree of accumulators mirroring [`postorder_stats_layout`]'s walk of a `DType`.
 enum StatsNode {
-    /// An opaque leaf: a non-struct dtype, including `List`/`FixedSizeList` (not recursed into).
+    /// An opaque leaf: a dtype with no addressable children. Curently includes List/FixedSizedList and Map.
     Leaf(StatsAccumulator),
     /// A dtype that does not support file stats (e.g. [`DType::Variant`]); contributes no entries.
     Skipped,
-    Struct {
-        /// One child per struct field, in declaration order.
-        children: Vec<(FieldName, StatsNode)>,
-        /// Accumulates the struct's own null count. `Some` iff the struct itself is nullable.
-        null_count: Option<StatsAccumulator>,
+    /// A dtype with addressable children. Currently only built for `DType::Struct`.
+    Container {
+        /// One child per addressable sub-dtype, in declaration order (one per struct field,
+        /// today).
+        children: Vec<(Field, StatsNode)>,
+        /// Stats computed over the container's own, undecomposed dtype (e.g. a `Struct`'s null
+        /// count), reusing `Leaf`/`Skipped` rather than a separate accumulator-plus-flag pair:
+        /// `Leaf` when [`container_has_own_entry`] says this dtype gets a trailing entry (the same
+        /// check [`postorder_stats_layout_into`] uses, so the two can't disagree), `Skipped`
+        /// otherwise — which also means a non-nullable struct's null count is never even
+        /// accumulated, not just never emitted.
+        own: Box<StatsNode>,
     },
 }
 
@@ -242,17 +249,23 @@ impl StatsNode {
                     .zip(struct_fields.fields())
                     .map(|(name, field_dtype)| {
                         (
-                            name.clone(),
+                            Field::Name(name.clone()),
                             Self::build(&field_dtype, stats, max_variable_length_statistics_size),
                         )
                     })
                     .collect();
-                let null_count = (dtype.nullability() == Nullability::Nullable).then(|| {
-                    StatsAccumulator::new(dtype, stats, max_variable_length_statistics_size)
-                });
-                Self::Struct {
+                let own = if container_has_own_entry(dtype) {
+                    Self::Leaf(StatsAccumulator::new(
+                        dtype,
+                        stats,
+                        max_variable_length_statistics_size,
+                    ))
+                } else {
+                    Self::Skipped
+                };
+                Self::Container {
                     children,
-                    null_count,
+                    own: Box::new(own),
                 }
             }
             None if !supports_file_stats(dtype) => Self::Skipped,
@@ -268,40 +281,39 @@ impl StatsNode {
         match self {
             Self::Skipped => Ok(()),
             Self::Leaf(acc) => acc.push_chunk(array, ctx),
-            Self::Struct { .. } => {
+            Self::Container { .. } => {
                 let struct_array = array.clone().execute::<StructArray>(ctx)?;
                 self.push_struct_chunk(array, &struct_array, ctx)
             }
         }
     }
 
-    /// Pushes a chunk into a `Struct` node given an already-executed `StructArray` for `array`.
+    /// Pushes a chunk into a `Container` node given an already-executed `StructArray` for `array`.
     ///
     /// Lets callers that already had to execute the chunk to a `StructArray` for another purpose
     /// (e.g. [`FileStatsAccumulator::process`], which also feeds the legacy per-top-level-field
     /// accumulators from the same execution) avoid doing so a second time.
     ///
+    /// `Container` is only ever built for `DType::Struct` today, so every child is addressed by
+    /// [`Field::Name`] and extracted via [`StructArray::iter_unmasked_fields`]. A future `List`/
+    /// `Map` container would need a different extraction here (e.g. flattened elements, or
+    /// derived per-row shape arrays), dispatched per child's [`Field`] kind.
+    ///
     /// # Panics
     ///
-    /// Panics if `self` is not `Self::Struct`.
+    /// Panics if `self` is not `Self::Container`.
     fn push_struct_chunk(
         &mut self,
         array: &ArrayRef,
         struct_array: &StructArray,
         ctx: &mut ExecutionCtx,
     ) -> VortexResult<()> {
-        let Self::Struct {
-            children,
-            null_count,
-        } = self
-        else {
-            vortex_panic!("push_struct_chunk is only called on Struct nodes");
+        let Self::Container { children, own } = self else {
+            vortex_panic!("push_struct_chunk is only called on Container nodes");
         };
-        // The struct's own `ArrayRef` already carries the validity needed to compute its null
-        // count, so we push it directly rather than building a synthetic array.
-        if let Some(null_count) = null_count {
-            null_count.push_chunk(array, ctx)?;
-        }
+        // The container's own `ArrayRef` already carries the validity needed to compute its own
+        // stats (e.g. null count), so we push it directly rather than building a synthetic array.
+        own.push_chunk(array, ctx)?;
         for ((_, child), field) in children
             .iter_mut()
             .zip_eq(struct_array.iter_unmasked_fields())
@@ -323,17 +335,11 @@ impl StatsNode {
                 out.push(acc.as_stats_set(ctx)?);
                 Ok(())
             }
-            Self::Struct {
-                children,
-                null_count,
-            } => {
+            Self::Container { children, own } => {
                 for (_, child) in children.iter_mut() {
                     child.collect_stats_sets(ctx, out)?;
                 }
-                if let Some(null_count) = null_count {
-                    out.push(null_count.as_stats_set(ctx)?);
-                }
-                Ok(())
+                own.collect_stats_sets(ctx, out)
             }
         }
     }
