@@ -2,7 +2,6 @@
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
 use std::future;
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -39,6 +38,7 @@ use vortex_error::VortexResult;
 use vortex_error::vortex_panic;
 use vortex_session::VortexSession;
 
+use crate::layouts::zoned::default_bounded_stat_max_bytes;
 use crate::sequence::SendableSequentialStream;
 use crate::sequence::SequenceId;
 use crate::sequence::SequentialStreamAdapter;
@@ -47,17 +47,10 @@ use crate::sequence::SequentialStreamExt;
 pub fn accumulate_stats(
     stream: SendableSequentialStream,
     stats: Option<Arc<[AggregateFnRef]>>,
-    max_variable_length_statistics_size: usize,
     session: &VortexSession,
     write_legacy_stats: bool,
 ) -> (FileStatsAccumulator, SendableSequentialStream) {
-    let accumulator = FileStatsAccumulator::new(
-        stream.dtype(),
-        stats,
-        max_variable_length_statistics_size,
-        session,
-        write_legacy_stats,
-    );
+    let accumulator = FileStatsAccumulator::new(stream.dtype(), stats, session, write_legacy_stats);
     let stream = SequentialStreamAdapter::new(
         stream.dtype().clone(),
         stream.scan(accumulator.clone(), |acc, item| {
@@ -74,11 +67,7 @@ struct StatsAccumulator {
 }
 
 impl StatsAccumulator {
-    fn new(
-        dtype: &DType,
-        stats: Option<&[AggregateFnRef]>,
-        max_variable_length_statistics_size: usize,
-    ) -> Self {
+    fn new(dtype: &DType, stats: Option<&[AggregateFnRef]>) -> Self {
         if !supports_file_stats(dtype) {
             return Self {
                 aggregates: Vec::new(),
@@ -92,9 +81,7 @@ impl StatsAccumulator {
         let stats = match stats {
             Some(stats) => stats,
             None => {
-                let max_bytes = NonZeroUsize::new(max_variable_length_statistics_size)
-                    .unwrap_or_else(default_max_variable_length_statistics_size);
-                default_stats = default_pruning_aggregate_fns(dtype, max_bytes);
+                default_stats = default_pruning_aggregate_fns(dtype);
                 default_stats.as_slice()
             }
         };
@@ -157,10 +144,12 @@ fn is_varlen_dtype(dtype: &DType) -> bool {
 }
 
 /// Default file-level pruning aggregates for `dtype`, chosen the way `default_zoned_aggregate_fns`
-/// picks zoned aggregates: a byte-bounded min/max (capped at `max_bytes`) for variable-length
-/// columns, and exact min/max otherwise.
-fn default_pruning_aggregate_fns(dtype: &DType, max_bytes: NonZeroUsize) -> Vec<AggregateFnRef> {
+/// picks zoned aggregates: a byte-bounded min/max (capped at [`default_bounded_stat_max_bytes`])
+/// for variable-length columns, and exact min/max otherwise. Callers wanting a different bound pass
+/// their own `BoundedMax`/`BoundedMin` instead.
+fn default_pruning_aggregate_fns(dtype: &DType) -> Vec<AggregateFnRef> {
     let (max, min) = if is_varlen_dtype(dtype) {
+        let max_bytes = default_bounded_stat_max_bytes();
         (
             BoundedMax.bind(BoundedMaxOptions { max_bytes }),
             BoundedMin.bind(BoundedMinOptions { max_bytes }),
@@ -179,11 +168,6 @@ fn default_pruning_aggregate_fns(dtype: &DType, max_bytes: NonZeroUsize) -> Vec<
         NullCount.bind(EmptyOptions),
         NanCount.bind(EmptyOptions),
     ]
-}
-
-fn default_max_variable_length_statistics_size() -> NonZeroUsize {
-    // SAFETY: 64 is non-zero.
-    unsafe { NonZeroUsize::new_unchecked(64) }
 }
 
 /// Computes the post-order sequence of `(FieldPath, DType)` entries that file-level statistics
@@ -241,11 +225,7 @@ enum StatsNode {
 }
 
 impl StatsNode {
-    fn build(
-        dtype: &DType,
-        stats: Option<&[AggregateFnRef]>,
-        max_variable_length_statistics_size: usize,
-    ) -> Self {
+    fn build(dtype: &DType, stats: Option<&[AggregateFnRef]>) -> Self {
         match dtype.as_struct_fields_opt() {
             Some(struct_fields) => {
                 let children = struct_fields
@@ -253,18 +233,11 @@ impl StatsNode {
                     .iter()
                     .zip(struct_fields.fields())
                     .map(|(name, field_dtype)| {
-                        (
-                            Field::Name(name.clone()),
-                            Self::build(&field_dtype, stats, max_variable_length_statistics_size),
-                        )
+                        (Field::Name(name.clone()), Self::build(&field_dtype, stats))
                     })
                     .collect();
                 let own = if dtype.nullability() == Nullability::Nullable {
-                    Self::Leaf(StatsAccumulator::new(
-                        dtype,
-                        stats,
-                        max_variable_length_statistics_size,
-                    ))
+                    Self::Leaf(StatsAccumulator::new(dtype, stats))
                 } else {
                     Self::Skipped
                 };
@@ -274,11 +247,7 @@ impl StatsNode {
                 }
             }
             None if !supports_file_stats(dtype) => Self::Skipped,
-            None => Self::Leaf(StatsAccumulator::new(
-                dtype,
-                stats,
-                max_variable_length_statistics_size,
-            )),
+            None => Self::Leaf(StatsAccumulator::new(dtype, stats)),
         }
     }
 
@@ -370,33 +339,18 @@ impl FileStatsAccumulator {
     fn new(
         dtype: &DType,
         stats: Option<Arc<[AggregateFnRef]>>,
-        max_variable_length_statistics_size: usize,
         session: &VortexSession,
         write_legacy_stats: bool,
     ) -> Self {
-        let root = Arc::new(Mutex::new(StatsNode::build(
-            dtype,
-            stats.as_deref(),
-            max_variable_length_statistics_size,
-        )));
+        let root = Arc::new(Mutex::new(StatsNode::build(dtype, stats.as_deref())));
 
         let legacy = Arc::new(Mutex::new(if write_legacy_stats {
             match dtype.as_struct_fields_opt() {
                 Some(struct_fields) => struct_fields
                     .fields()
-                    .map(|field_dtype| {
-                        StatsAccumulator::new(
-                            &field_dtype,
-                            stats.as_deref(),
-                            max_variable_length_statistics_size,
-                        )
-                    })
+                    .map(|field_dtype| StatsAccumulator::new(&field_dtype, stats.as_deref()))
                     .collect(),
-                None => vec![StatsAccumulator::new(
-                    dtype,
-                    stats.as_deref(),
-                    max_variable_length_statistics_size,
-                )],
+                None => vec![StatsAccumulator::new(dtype, stats.as_deref())],
             }
         } else {
             Vec::new()
@@ -467,6 +421,8 @@ impl FileStatsAccumulator {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use rstest::rstest;
     use vortex_array::IntoArray;
     use vortex_array::array_session;
@@ -491,7 +447,7 @@ mod tests {
     #[case::all_within_bound(&["short", "shorter"], true, true)]
     #[case::only_min_truncated(&["short", "a value longer than the bound"], true, false)]
     #[case::both_truncated(&["zz value past the bound", "aa value past the bound"], false, false)]
-    fn default_varlen_min_max_exact_iff_extremum_fits_bound(
+    fn bounded_varlen_min_max_exact_iff_extremum_fits_bound(
         #[values(
             DType::Utf8(Nullability::NonNullable),
             DType::Binary(Nullability::NonNullable)
@@ -502,7 +458,12 @@ mod tests {
         #[case] min_exact: bool,
     ) -> VortexResult<()> {
         let mut ctx = array_session().create_execution_ctx();
-        let mut acc = StatsAccumulator::new(&dtype, None, 8);
+        let max_bytes = NonZeroUsize::new(8).vortex_expect("non-zero");
+        let bounded = [
+            BoundedMax.bind(BoundedMaxOptions { max_bytes }),
+            BoundedMin.bind(BoundedMinOptions { max_bytes }),
+        ];
+        let mut acc = StatsAccumulator::new(&dtype, Some(&bounded));
         // One chunk per value, so exactness has to survive merging across chunks.
         for value in values {
             let mut builder = VarBinViewBuilder::with_capacity_in(
@@ -523,7 +484,7 @@ mod tests {
     #[test]
     fn default_pruning_aggregate_fns_uses_bounded_min_max_for_varlen() {
         let dtype = DType::Utf8(Nullability::NonNullable);
-        let fns = default_pruning_aggregate_fns(&dtype, NonZeroUsize::new(12).unwrap());
+        let fns = default_pruning_aggregate_fns(&dtype);
         assert!(fns.iter().any(|f| f.is::<BoundedMax>()));
         assert!(fns.iter().any(|f| f.is::<BoundedMin>()));
         assert!(!fns.iter().any(|f| f.is::<Max>()));
@@ -532,7 +493,7 @@ mod tests {
 
     #[test]
     fn default_pruning_aggregate_fns_uses_plain_min_max_for_fixed_width() {
-        let fns = default_pruning_aggregate_fns(&i32_dtype(), NonZeroUsize::new(12).unwrap());
+        let fns = default_pruning_aggregate_fns(&i32_dtype());
         assert!(fns.iter().any(|f| f.is::<Max>()));
         assert!(fns.iter().any(|f| f.is::<Min>()));
         assert!(!fns.iter().any(|f| f.is::<BoundedMax>()));
@@ -553,7 +514,7 @@ mod tests {
         builder.append_value("a long value that would have been truncated before");
         builder.append_value("short");
 
-        let mut acc = StatsAccumulator::new(&dtype, Some(&[agg(Stat::Max), agg(Stat::Min)]), 12);
+        let mut acc = StatsAccumulator::new(&dtype, Some(&[agg(Stat::Max), agg(Stat::Min)]));
         acc.push_chunk(&builder.finish(), &mut ctx)?;
 
         let stats = acc.as_stats_set(&mut ctx)?;
@@ -574,7 +535,6 @@ mod tests {
                 agg(Stat::Sum),
                 agg(Stat::NullCount),
             ]),
-            12,
         );
 
         acc.push_chunk(&buffer![0, 5, 2].into_array(), &mut ctx)?;
@@ -734,7 +694,7 @@ mod tests {
             StructArray::new(FieldNames::from(["a"]), [struct_a], 3, root_validity).into_array();
 
         let requested = [agg(Stat::NullCount), agg(Stat::Min), agg(Stat::Max)];
-        let mut node = StatsNode::build(root.dtype(), Some(&requested), 1024);
+        let mut node = StatsNode::build(root.dtype(), Some(&requested));
         node.push_chunk(&root, &mut ctx)?;
 
         let mut stats_sets = Vec::new();
@@ -778,7 +738,7 @@ mod tests {
             .into_array();
 
         let requested = [agg(Stat::NullCount), agg(Stat::Min), agg(Stat::Max)];
-        let mut node = StatsNode::build(outer.dtype(), Some(&requested), 1024);
+        let mut node = StatsNode::build(outer.dtype(), Some(&requested));
         node.push_chunk(&outer, &mut ctx)?;
 
         let mut stats_sets = Vec::new();
@@ -808,7 +768,6 @@ mod tests {
                 agg(Stat::Min),
                 agg(Stat::Max),
             ])),
-            1024,
             &session,
             true,
         );
@@ -849,7 +808,6 @@ mod tests {
         let acc = FileStatsAccumulator::new(
             &dtype,
             Some(Arc::from([agg(Stat::Min), agg(Stat::Max)])),
-            1024,
             &session,
             false,
         );

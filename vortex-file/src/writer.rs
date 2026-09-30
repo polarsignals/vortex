@@ -82,7 +82,6 @@ pub struct VortexWriteOptions {
     disable_editions: bool,
     buffered_bytes: BufferedBytesTracker,
     exclude_dtype: bool,
-    max_variable_length_statistics_size: usize,
     /// The aggregates to compute for file-level statistics.
     ///
     /// If unset, the writer chooses pruning aggregates from the file dtype.
@@ -111,7 +110,6 @@ impl VortexWriteOptions {
             exclude_dtype: false,
             file_statistics: None,
             write_legacy_statistics: true,
-            max_variable_length_statistics_size: 64,
             metadata: HashMap::default(),
         }
     }
@@ -296,7 +294,6 @@ impl VortexWriteOptions {
         let (file_stats, stream) = accumulate_stats(
             stream,
             self.file_statistics.clone().map(Arc::from),
-            self.max_variable_length_statistics_size,
             &self.session,
             self.write_legacy_statistics,
         );
