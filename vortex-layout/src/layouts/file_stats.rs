@@ -124,9 +124,15 @@ impl StatsAccumulator {
         let mut stats_set = StatsSet::default();
 
         for (aggregate_fn, accumulator) in &self.aggregates {
-            let Some((stat, satisfaction)) = Stat::from_aggregate_fn_partial(aggregate_fn) else {
+            let Some((stat, _)) = Stat::from_aggregate_fn_partial(aggregate_fn) else {
                 continue;
             };
+            let requested = stat
+                .aggregate_fn()
+                .vortex_expect("from_aggregate_fn_partial only matches stats with an aggregate fn");
+            // Ask the accumulator rather than relying on `aggregate_fn` alone: e.g. `BoundedMax` is
+            // only approximate in general, but exact when no value exceeded its byte bound.
+            let satisfaction = accumulator.can_satisfy(&requested);
             let Some(v) = accumulator.final_scalar()?.into_value() else {
                 continue;
             };
@@ -227,9 +233,8 @@ enum StatsNode {
         children: Vec<(Field, StatsNode)>,
         /// Stats computed over the container's own, undecomposed dtype (e.g. a `Struct`'s null
         /// count), reusing `Leaf`/`Skipped` rather than a separate accumulator-plus-flag pair:
-        /// `Leaf` when [`container_has_own_entry`] says this dtype gets a trailing entry (the same
-        /// check [`postorder_stats_layout_into`] uses, so the two can't disagree), `Skipped`
-        /// otherwise — which also means a non-nullable struct's null count is never even
+        /// `Leaf` when the container is nullable (matching the trailing entry
+        /// [`postorder_stats_layout_into`] emits for it), `Skipped` otherwise — which also means a non-nullable struct's null count is never even
         /// accumulated, not just never emitted.
         own: Box<StatsNode>,
     },
@@ -254,7 +259,7 @@ impl StatsNode {
                         )
                     })
                     .collect();
-                let own = if container_has_own_entry(dtype) {
+                let own = if dtype.nullability() == Nullability::Nullable {
                     Self::Leaf(StatsAccumulator::new(
                         dtype,
                         stats,
@@ -483,28 +488,35 @@ mod tests {
     }
 
     #[rstest]
-    #[case(DType::Utf8(Nullability::NonNullable))]
-    #[case(DType::Binary(Nullability::NonNullable))]
-    fn default_varlen_stats_use_bounded_min_max_and_are_inexact(
-        #[case] dtype: DType,
+    #[case::all_within_bound(&["short", "shorter"], true, true)]
+    #[case::only_min_truncated(&["short", "a value longer than the bound"], true, false)]
+    #[case::both_truncated(&["zz value past the bound", "aa value past the bound"], false, false)]
+    fn default_varlen_min_max_exact_iff_extremum_fits_bound(
+        #[values(
+            DType::Utf8(Nullability::NonNullable),
+            DType::Binary(Nullability::NonNullable)
+        )]
+        dtype: DType,
+        #[case] values: &[&str],
+        #[case] max_exact: bool,
+        #[case] min_exact: bool,
     ) -> VortexResult<()> {
         let mut ctx = array_session().create_execution_ctx();
-        let mut builder = VarBinViewBuilder::with_capacity_in(
-            dtype.clone(),
-            2,
-            vortex_buffer::BufferAllocatorRef::statically_allocated(),
-        );
-        builder.append_value("short");
-        builder.append_value("also short");
-
-        let mut acc = StatsAccumulator::new(&dtype, None, 64);
-        acc.push_chunk(&builder.finish(), &mut ctx)?;
+        let mut acc = StatsAccumulator::new(&dtype, None, 8);
+        // One chunk per value, so exactness has to survive merging across chunks.
+        for value in values {
+            let mut builder = VarBinViewBuilder::with_capacity_in(
+                dtype.clone(),
+                1,
+                vortex_buffer::BufferAllocatorRef::statically_allocated(),
+            );
+            builder.append_value(value);
+            acc.push_chunk(&builder.finish(), &mut ctx)?;
+        }
 
         let stats = acc.as_stats_set(&mut ctx)?;
-        // `BoundedMax`/`BoundedMin` can never exactly stand in for `Max`/`Min`, so the default
-        // varlen stats are always inexact, even when the values would fit untruncated.
-        assert!(matches!(stats.get(Stat::Max), Precision::Inexact(_)));
-        assert!(matches!(stats.get(Stat::Min), Precision::Inexact(_)));
+        assert_eq!(stats.get(Stat::Max).is_exact(), max_exact);
+        assert_eq!(stats.get(Stat::Min).is_exact(), min_exact);
         Ok(())
     }
 
