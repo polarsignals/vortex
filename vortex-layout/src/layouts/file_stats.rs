@@ -12,6 +12,7 @@ use vortex_array::ExecutionCtx;
 use vortex_array::VortexSessionExecute;
 use vortex_array::aggregate_fn::AccumulatorRef;
 use vortex_array::aggregate_fn::AggregateFnRef;
+use vortex_array::aggregate_fn::AggregateFnSatisfaction;
 use vortex_array::aggregate_fn::AggregateFnVTableExt;
 use vortex_array::aggregate_fn::EmptyOptions;
 use vortex_array::aggregate_fn::NumericalAggregateOpts;
@@ -32,25 +33,39 @@ use vortex_array::dtype::FieldPath;
 use vortex_array::dtype::Nullability;
 use vortex_array::expr::stats::Precision;
 use vortex_array::expr::stats::Stat;
+use vortex_array::scalar::Scalar;
 use vortex_array::stats::StatsSet;
-use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
+use vortex_error::vortex_bail;
 use vortex_error::vortex_panic;
 use vortex_session::VortexSession;
 
+use crate::LayoutWriterContext;
 use crate::layouts::zoned::default_bounded_stat_max_bytes;
 use crate::sequence::SendableSequentialStream;
 use crate::sequence::SequenceId;
 use crate::sequence::SequentialStreamAdapter;
 use crate::sequence::SequentialStreamExt;
 
+/// Accumulates file statistics over `stream` as it passes through.
+///
+/// `stats` are the aggregates to record for every field, or `None` for each field's default (see
+/// [`default_pruning_aggregate_fns`]). Only aggregates `ctx` allows are recorded in the nested
+/// statistics: an explicitly requested aggregate it forbids fails, like it does for zone maps,
+/// while forbidden defaults are left out.
+///
+/// # Errors
+///
+/// Returns an error if `stats` contains an aggregate `ctx` forbids.
 pub fn accumulate_stats(
     stream: SendableSequentialStream,
     stats: Option<Arc<[AggregateFnRef]>>,
     session: &VortexSession,
     write_legacy_stats: bool,
-) -> (FileStatsAccumulator, SendableSequentialStream) {
-    let accumulator = FileStatsAccumulator::new(stream.dtype(), stats, session, write_legacy_stats);
+    ctx: &LayoutWriterContext,
+) -> VortexResult<(FileStatsAccumulator, SendableSequentialStream)> {
+    let accumulator =
+        FileStatsAccumulator::try_new(stream.dtype(), stats, session, write_legacy_stats, ctx)?;
     let stream = SequentialStreamAdapter::new(
         stream.dtype().clone(),
         stream.scan(accumulator.clone(), |acc, item| {
@@ -58,7 +73,129 @@ pub fn accumulate_stats(
         }),
     )
     .sendable();
-    (accumulator, stream)
+    Ok((accumulator, stream))
+}
+
+/// One aggregate function's value over a file statistics entry.
+#[derive(Clone, Debug)]
+pub struct AggregateStat {
+    aggregate_fn: AggregateFnRef,
+    /// The aggregate's partial state, which is what the footer stores. `None` for values recovered
+    /// from the legacy `ArrayStats` footer format, which only stores results.
+    partial: Option<Scalar>,
+    value: Precision<Scalar>,
+}
+
+impl AggregateStat {
+    fn from_accumulator(
+        aggregate_fn: AggregateFnRef,
+        accumulator: &AccumulatorRef,
+    ) -> VortexResult<Self> {
+        Ok(Self {
+            aggregate_fn,
+            partial: Some(accumulator.partial_scalar()?),
+            value: Precision::exact(accumulator.final_scalar()?),
+        })
+    }
+
+    /// Rebuilds an aggregate's value from its `partial` state over a field of `dtype`.
+    pub fn try_from_partial(
+        aggregate_fn: AggregateFnRef,
+        partial: Scalar,
+        dtype: &DType,
+    ) -> VortexResult<Self> {
+        let mut accumulator = aggregate_fn.accumulator(dtype)?;
+        accumulator.combine_partials(partial.clone())?;
+        let value = Precision::exact(accumulator.final_scalar()?);
+        Ok(Self {
+            aggregate_fn,
+            partial: Some(partial),
+            value,
+        })
+    }
+
+    /// An aggregate value without a partial state, such as one read from the legacy `ArrayStats`
+    /// footer format.
+    pub fn from_value(aggregate_fn: AggregateFnRef, value: Precision<Scalar>) -> Self {
+        Self {
+            aggregate_fn,
+            partial: None,
+            value,
+        }
+    }
+
+    /// The aggregate function this value was computed by.
+    pub fn aggregate_fn(&self) -> &AggregateFnRef {
+        &self.aggregate_fn
+    }
+
+    /// The aggregate's partial state, if known.
+    pub fn partial(&self) -> Option<&Scalar> {
+        self.partial.as_ref()
+    }
+
+    /// The aggregate's value. A null value means the aggregate saw no valid input.
+    pub fn value(&self) -> &Precision<Scalar> {
+        &self.value
+    }
+}
+
+/// The aggregates recorded for one file statistics entry.
+#[derive(Clone, Debug, Default)]
+pub struct AggregateStats {
+    aggregates: Vec<AggregateStat>,
+}
+
+impl AggregateStats {
+    pub fn new(aggregates: Vec<AggregateStat>) -> Self {
+        Self { aggregates }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.aggregates.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &AggregateStat> {
+        self.aggregates.iter()
+    }
+
+    /// Returns the value of `requested`, from the recorded aggregate that best satisfies it, the
+    /// way zone maps resolve aggregates: one that satisfies it exactly over one that only
+    /// approximates it. The value is exact only if the recorded value is exact and satisfies
+    /// `requested` exactly. Absent if no recorded aggregate satisfies `requested`, or if the value
+    /// is null.
+    pub fn get(&self, requested: &AggregateFnRef) -> Precision<Scalar> {
+        let mut approximate = Precision::Absent;
+        for stat in &self.aggregates {
+            match stat.aggregate_fn.can_satisfy(requested) {
+                AggregateFnSatisfaction::Exact => return non_null(stat.value.clone()),
+                AggregateFnSatisfaction::Approximate => {
+                    approximate = stat.value.clone().into_inexact();
+                }
+                AggregateFnSatisfaction::No => {}
+            }
+        }
+        non_null(approximate)
+    }
+
+    /// Returns the recorded aggregates as a [`StatsSet`], for consumers keyed by [`Stat`].
+    pub fn to_stats_set(&self) -> StatsSet {
+        let mut stats_set = StatsSet::default();
+        for stat in Stat::all() {
+            let Some(requested) = stat.aggregate_fn() else {
+                continue;
+            };
+            let value = self.get(&requested).and_then(Scalar::into_value);
+            if !value.is_absent() {
+                stats_set.set(stat, value);
+            }
+        }
+        stats_set
+    }
+}
+
+fn non_null(value: Precision<Scalar>) -> Precision<Scalar> {
+    value.and_then(|value| (!value.is_null()).then_some(value))
 }
 
 /// Accumulates write-time statistics for a single file column.
@@ -106,32 +243,49 @@ impl StatsAccumulator {
         Ok(())
     }
 
-    /// Returns an aggregated stats set for the table.
-    fn as_stats_set(&mut self, _ctx: &mut ExecutionCtx) -> VortexResult<StatsSet> {
-        let mut stats_set = StatsSet::default();
-
+    /// Returns the accumulated aggregates that `allowed` permits.
+    ///
+    /// A bounded aggregate whose accumulator ended up exact, because no value exceeded its byte
+    /// bound, is recorded as the exact aggregate it stands in for (e.g. `BoundedMax` as `Max`).
+    /// The footer stores partial states, which don't record that exactness, so recording the exact
+    /// aggregate is what keeps it.
+    fn aggregate_stats(
+        &self,
+        allowed: impl Fn(&AggregateFnRef) -> bool,
+    ) -> VortexResult<AggregateStats> {
+        let mut out = Vec::with_capacity(self.aggregates.len());
         for (aggregate_fn, accumulator) in &self.aggregates {
-            let Some((stat, _)) = Stat::from_aggregate_fn_partial(aggregate_fn) else {
-                continue;
-            };
-            let requested = stat
-                .aggregate_fn()
-                .vortex_expect("from_aggregate_fn_partial only matches stats with an aggregate fn");
-            // Ask the accumulator rather than relying on `aggregate_fn` alone: e.g. `BoundedMax` is
-            // only approximate in general, but exact when no value exceeded its byte bound.
-            let satisfaction = accumulator.can_satisfy(&requested);
-            let Some(v) = accumulator.final_scalar()?.into_value() else {
-                continue;
-            };
-            let precision = if satisfaction.is_exact() {
-                Precision::exact(v)
-            } else {
-                Precision::inexact(v)
-            };
-            stats_set.set(stat, precision);
+            if let Some(exact) = exact_counterpart(aggregate_fn)
+                && allowed(&exact)
+                && accumulator.can_satisfy(&exact).is_exact()
+            {
+                // The exact counterparts' partial state is their result, which is the bounded
+                // aggregate's result here.
+                let value = accumulator.final_scalar()?;
+                out.push(AggregateStat {
+                    aggregate_fn: exact,
+                    partial: Some(value.clone()),
+                    value: Precision::exact(value),
+                });
+            } else if allowed(aggregate_fn) {
+                out.push(AggregateStat::from_accumulator(
+                    aggregate_fn.clone(),
+                    accumulator,
+                )?);
+            }
         }
+        Ok(AggregateStats::new(out))
+    }
+}
 
-        Ok(stats_set)
+/// The exact aggregate a bounded aggregate approximates, if any.
+fn exact_counterpart(aggregate_fn: &AggregateFnRef) -> Option<AggregateFnRef> {
+    if aggregate_fn.is::<BoundedMax>() {
+        Some(Max.bind(NumericalAggregateOpts::skip_nans()))
+    } else if aggregate_fn.is::<BoundedMin>() {
+        Some(Min.bind(NumericalAggregateOpts::skip_nans()))
+    } else {
+        None
     }
 }
 
@@ -297,23 +451,24 @@ impl StatsNode {
         Ok(())
     }
 
-    /// Appends this node's `StatsSet`s, in the same post-order as [`postorder_stats_layout`].
-    fn collect_stats_sets(
-        &mut self,
-        ctx: &mut ExecutionCtx,
-        out: &mut Vec<StatsSet>,
+    /// Appends this node's aggregates that `allowed` permits, in the same post-order as
+    /// [`postorder_stats_layout`].
+    fn collect_aggregate_stats(
+        &self,
+        allowed: &impl Fn(&AggregateFnRef) -> bool,
+        out: &mut Vec<AggregateStats>,
     ) -> VortexResult<()> {
         match self {
             Self::Skipped => Ok(()),
             Self::Leaf(acc) => {
-                out.push(acc.as_stats_set(ctx)?);
+                out.push(acc.aggregate_stats(allowed)?);
                 Ok(())
             }
             Self::Container { children, own } => {
-                for (_, child) in children.iter_mut() {
-                    child.collect_stats_sets(ctx, out)?;
+                for (_, child) in children {
+                    child.collect_aggregate_stats(allowed, out)?;
                 }
-                own.collect_stats_sets(ctx, out)
+                own.collect_aggregate_stats(allowed, out)
             }
         }
     }
@@ -332,16 +487,24 @@ pub struct FileStatsAccumulator {
     root: Arc<Mutex<StatsNode>>,
     legacy: Arc<Mutex<Vec<StatsAccumulator>>>,
     write_legacy_stats: bool,
+    writer_ctx: LayoutWriterContext,
     ctx: Arc<Mutex<ExecutionCtx>>,
 }
 
 impl FileStatsAccumulator {
-    fn new(
+    fn try_new(
         dtype: &DType,
         stats: Option<Arc<[AggregateFnRef]>>,
         session: &VortexSession,
         write_legacy_stats: bool,
-    ) -> Self {
+        writer_ctx: &LayoutWriterContext,
+    ) -> VortexResult<Self> {
+        for aggregate_fn in stats.iter().flat_map(|stats| stats.iter()) {
+            if !writer_ctx.allows_aggregate(&aggregate_fn.id()) {
+                vortex_bail!("Aggregate {} not permitted by ctx", aggregate_fn.id());
+            }
+        }
+
         let root = Arc::new(Mutex::new(StatsNode::build(dtype, stats.as_deref())));
 
         let legacy = Arc::new(Mutex::new(if write_legacy_stats {
@@ -356,12 +519,13 @@ impl FileStatsAccumulator {
             Vec::new()
         }));
 
-        Self {
+        Ok(Self {
             root,
             legacy,
             write_legacy_stats,
+            writer_ctx: writer_ctx.clone(),
             ctx: Arc::new(Mutex::new(session.create_execution_ctx())),
-        }
+        })
     }
 
     fn process(
@@ -394,27 +558,28 @@ impl FileStatsAccumulator {
         Ok((sequence_id, chunk))
     }
 
-    pub fn stats_sets(&self) -> Vec<StatsSet> {
-        let mut ctx = self.ctx.lock();
+    /// Returns the accumulated aggregates of every entry in the post-order nested layout (see
+    /// [`postorder_stats_layout`]), leaving out the aggregates the writer context forbids.
+    pub fn aggregate_stats(&self) -> VortexResult<Vec<AggregateStats>> {
+        let allowed =
+            |aggregate_fn: &AggregateFnRef| self.writer_ctx.allows_aggregate(&aggregate_fn.id());
         let mut out = Vec::new();
         self.root
             .lock()
-            .collect_stats_sets(&mut ctx, &mut out)
-            .vortex_expect("collect_stats_sets should not fail");
-        out
+            .collect_aggregate_stats(&allowed, &mut out)?;
+        Ok(out)
     }
 
-    /// Returns the legacy top-level-fields-only stats sets (one per top-level struct field, or a
+    /// Returns the legacy top-level-fields-only aggregates (one per top-level struct field, or a
     /// single entry for a non-struct root dtype). Empty if `write_legacy_stats` was `false`.
-    pub fn legacy_stats_sets(&self) -> Vec<StatsSet> {
-        let mut ctx = self.ctx.lock();
+    ///
+    /// The legacy `ArrayStats` format has a fixed slot per [`Stat`] rather than open-ended
+    /// aggregates, so it isn't restricted by the writer context.
+    pub fn legacy_aggregate_stats(&self) -> VortexResult<Vec<AggregateStats>> {
         self.legacy
             .lock()
-            .iter_mut()
-            .map(|acc| {
-                acc.as_stats_set(&mut ctx)
-                    .vortex_expect("as_stats_set should not fail")
-            })
+            .iter()
+            .map(|acc| acc.aggregate_stats(|_| true))
             .collect()
     }
 }
@@ -424,7 +589,9 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use rstest::rstest;
+    use vortex_array::ArrayContext;
     use vortex_array::IntoArray;
+    use vortex_array::aggregate_fn::AggregateFnVTable;
     use vortex_array::array_session;
     use vortex_array::arrays::BoolArray;
     use vortex_array::builders::ArrayBuilder;
@@ -435,8 +602,23 @@ mod tests {
     use vortex_array::scalar::ScalarValue;
     use vortex_array::validity::Validity;
     use vortex_buffer::buffer;
+    use vortex_error::VortexExpect;
+    use vortex_utils::aliases::hash_set::HashSet;
 
     use super::*;
+
+    fn stats_set(acc: &StatsAccumulator) -> VortexResult<StatsSet> {
+        Ok(acc.aggregate_stats(|_| true)?.to_stats_set())
+    }
+
+    fn node_stats_sets(node: &StatsNode) -> VortexResult<Vec<StatsSet>> {
+        let mut aggregates = Vec::new();
+        node.collect_aggregate_stats(&|_| true, &mut aggregates)?;
+        Ok(aggregates
+            .iter()
+            .map(AggregateStats::to_stats_set)
+            .collect())
+    }
 
     fn agg(stat: Stat) -> AggregateFnRef {
         stat.aggregate_fn()
@@ -475,7 +657,7 @@ mod tests {
             acc.push_chunk(&builder.finish(), &mut ctx)?;
         }
 
-        let stats = acc.as_stats_set(&mut ctx)?;
+        let stats = stats_set(&acc)?;
         assert_eq!(stats.get(Stat::Max).is_exact(), max_exact);
         assert_eq!(stats.get(Stat::Min).is_exact(), min_exact);
         Ok(())
@@ -517,7 +699,7 @@ mod tests {
         let mut acc = StatsAccumulator::new(&dtype, Some(&[agg(Stat::Max), agg(Stat::Min)]));
         acc.push_chunk(&builder.finish(), &mut ctx)?;
 
-        let stats = acc.as_stats_set(&mut ctx)?;
+        let stats = stats_set(&acc)?;
         assert!(matches!(stats.get(Stat::Max), Precision::Exact(_)));
         assert!(matches!(stats.get(Stat::Min), Precision::Exact(_)));
         Ok(())
@@ -541,7 +723,7 @@ mod tests {
         acc.push_chunk(&buffer![7, 1, 3].into_array(), &mut ctx)?;
         acc.push_chunk(&buffer![-4, 9].into_array(), &mut ctx)?;
 
-        let stats = acc.as_stats_set(&mut ctx)?;
+        let stats = stats_set(&acc)?;
         assert_eq!(
             stats.get(Stat::Max).as_exact(),
             Some(ScalarValue::from(9i32))
@@ -697,8 +879,7 @@ mod tests {
         let mut node = StatsNode::build(root.dtype(), Some(&requested));
         node.push_chunk(&root, &mut ctx)?;
 
-        let mut stats_sets = Vec::new();
-        node.collect_stats_sets(&mut ctx, &mut stats_sets)?;
+        let stats_sets = node_stats_sets(&node)?;
 
         // `a.b.c`'s own stats come first (post-order), then `a.b`'s null-count entry, then the
         // root's own null-count entry.
@@ -741,8 +922,7 @@ mod tests {
         let mut node = StatsNode::build(outer.dtype(), Some(&requested));
         node.push_chunk(&outer, &mut ctx)?;
 
-        let mut stats_sets = Vec::new();
-        node.collect_stats_sets(&mut ctx, &mut stats_sets)?;
+        let stats_sets = node_stats_sets(&node)?;
 
         // `a.b`'s stats come first (post-order), then `a`'s own null-count entry.
         assert_eq!(stats_sets.len(), 2);
@@ -754,14 +934,14 @@ mod tests {
     }
 
     #[test]
-    fn legacy_stats_sets_covers_only_top_level_fields() -> VortexResult<()> {
+    fn legacy_aggregate_stats_cover_only_top_level_fields() -> VortexResult<()> {
         // The legacy accumulation must have exactly one entry per top-level field, built against
         // that field's own dtype without recursing into it, even though it's a nested struct.
         let session = array_session();
         let inner_dtype = DType::struct_([("b", i32_dtype())], Nullability::Nullable);
         let dtype = DType::struct_([("a", inner_dtype)], Nullability::NonNullable);
 
-        let acc = FileStatsAccumulator::new(
+        let acc = FileStatsAccumulator::try_new(
             &dtype,
             Some(Arc::from([
                 agg(Stat::NullCount),
@@ -770,7 +950,8 @@ mod tests {
             ])),
             &session,
             true,
-        );
+            &LayoutWriterContext::new(ArrayContext::empty()),
+        )?;
 
         let b = buffer![1i32, 2, 3].into_array();
         let inner_validity =
@@ -782,14 +963,14 @@ mod tests {
         let (mut ptr, _eof) = SequenceId::root().split();
         acc.process(Ok((ptr.advance(), outer)))?;
 
-        let legacy = acc.legacy_stats_sets();
+        let legacy = acc.legacy_aggregate_stats()?;
         assert_eq!(legacy.len(), 1);
         assert_eq!(
-            legacy[0].get(Stat::NullCount).as_exact(),
-            Some(ScalarValue::from(1u64))
+            legacy[0].get(&agg(Stat::NullCount)),
+            Precision::exact(Scalar::from(1u64))
         );
-        assert!(legacy[0].get(Stat::Min).as_exact().is_none());
-        assert!(legacy[0].get(Stat::Max).as_exact().is_none());
+        assert!(legacy[0].get(&agg(Stat::Min)).is_absent());
+        assert!(legacy[0].get(&agg(Stat::Max)).is_absent());
         Ok(())
     }
 
@@ -805,17 +986,164 @@ mod tests {
         // and `zip_eq`s it against the struct's fields otherwise, both of which would panic if
         // `legacy` were left empty without also gating those code paths.
         let session = array_session();
-        let acc = FileStatsAccumulator::new(
+        let acc = FileStatsAccumulator::try_new(
             &dtype,
             Some(Arc::from([agg(Stat::Min), agg(Stat::Max)])),
             &session,
             false,
-        );
+            &LayoutWriterContext::new(ArrayContext::empty()),
+        )?;
 
         let (mut ptr, _eof) = SequenceId::root().split();
         acc.process(Ok((ptr.advance(), chunk)))?;
 
-        assert!(acc.legacy_stats_sets().is_empty());
+        assert!(acc.legacy_aggregate_stats()?.is_empty());
+        Ok(())
+    }
+
+    fn utf8_chunk(values: &[&str]) -> ArrayRef {
+        let dtype = DType::Utf8(Nullability::NonNullable);
+        let mut builder = VarBinViewBuilder::with_capacity_in(
+            dtype,
+            values.len(),
+            vortex_buffer::BufferAllocatorRef::statically_allocated(),
+        );
+        for value in values {
+            builder.append_value(value);
+        }
+        builder.finish()
+    }
+
+    #[rstest]
+    #[case::untruncated(&["short", "shorter"], true)]
+    #[case::truncated(&["a value longer than the bound"], false)]
+    fn exact_bounded_max_is_recorded_as_max(
+        #[case] values: &[&str],
+        #[case] exact: bool,
+    ) -> VortexResult<()> {
+        let mut ctx = array_session().create_execution_ctx();
+        let max_bytes = NonZeroUsize::new(8).vortex_expect("non-zero");
+        let mut acc = StatsAccumulator::new(
+            &DType::Utf8(Nullability::NonNullable),
+            Some(&[BoundedMax.bind(BoundedMaxOptions { max_bytes })]),
+        );
+        acc.push_chunk(&utf8_chunk(values), &mut ctx)?;
+
+        let aggregates = acc.aggregate_stats(|_| true)?;
+        let [recorded] = aggregates.iter().collect::<Vec<_>>()[..] else {
+            vortex_panic!("expected one recorded aggregate");
+        };
+        assert_eq!(recorded.aggregate_fn().is::<Max>(), exact);
+        assert_eq!(recorded.aggregate_fn().is::<BoundedMax>(), !exact);
+        // The stored partial must rebuild the same value on read.
+        let partial = recorded
+            .partial()
+            .vortex_expect("accumulated aggregates have a partial");
+        let rebuilt = AggregateStat::try_from_partial(
+            recorded.aggregate_fn().clone(),
+            partial.clone(),
+            &DType::Utf8(Nullability::NonNullable),
+        )?;
+        assert_eq!(rebuilt.value(), recorded.value());
+        Ok(())
+    }
+
+    #[test]
+    fn exact_bounded_max_stays_bounded_when_max_is_not_allowed() -> VortexResult<()> {
+        let mut ctx = array_session().create_execution_ctx();
+        let max_bytes = NonZeroUsize::new(8).vortex_expect("non-zero");
+        let mut acc = StatsAccumulator::new(
+            &DType::Utf8(Nullability::NonNullable),
+            Some(&[BoundedMax.bind(BoundedMaxOptions { max_bytes })]),
+        );
+        acc.push_chunk(&utf8_chunk(&["short"]), &mut ctx)?;
+
+        let aggregates = acc.aggregate_stats(|aggregate_fn| !aggregate_fn.is::<Max>())?;
+        assert!(
+            aggregates
+                .iter()
+                .all(|stat| stat.aggregate_fn().is::<BoundedMax>())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn get_prefers_an_exact_aggregate_and_skips_nulls() -> VortexResult<()> {
+        let max_bytes = NonZeroUsize::new(8).vortex_expect("non-zero");
+        let requested = Max.bind(NumericalAggregateOpts::skip_nans());
+        let bound = Scalar::utf8("b", Nullability::Nullable);
+        let max = Scalar::utf8("a", Nullability::Nullable);
+        let bounded = AggregateStat::from_value(
+            BoundedMax.bind(BoundedMaxOptions { max_bytes }),
+            Precision::exact(bound.clone()),
+        );
+
+        let only_bounded = AggregateStats::new(vec![bounded.clone()]);
+        assert_eq!(only_bounded.get(&requested), Precision::inexact(bound));
+
+        let both = AggregateStats::new(vec![
+            bounded,
+            AggregateStat::from_value(requested.clone(), Precision::exact(max.clone())),
+        ]);
+        assert_eq!(both.get(&requested), Precision::exact(max));
+
+        let null = AggregateStats::new(vec![AggregateStat::from_value(
+            requested.clone(),
+            Precision::exact(Scalar::null(DType::Utf8(Nullability::Nullable))),
+        )]);
+        assert!(null.get(&requested).is_absent());
+        Ok(())
+    }
+
+    #[test]
+    fn forbidden_aggregates_are_gated() -> VortexResult<()> {
+        let session = array_session();
+        let dtype = DType::struct_([("a", i32_dtype())], Nullability::NonNullable);
+        let ctx = LayoutWriterContext::new(ArrayContext::empty()).with_allowed_aggregates(
+            HashSet::from_iter([Min.id(), Max.id(), NanCount.id(), NullCount.id()]),
+        );
+
+        // An explicitly requested aggregate the context forbids fails the write.
+        let error = FileStatsAccumulator::try_new(
+            &dtype,
+            Some(Arc::from([agg(Stat::Sum)])),
+            &session,
+            true,
+            &ctx,
+        )
+        .err()
+        .vortex_expect("Sum is not permitted");
+        assert!(error.to_string().contains("not permitted by ctx"));
+
+        // The defaults leave it out of the nested aggregates, but the legacy stats keep it.
+        let acc = FileStatsAccumulator::try_new(&dtype, None, &session, true, &ctx)?;
+        let chunk = StructArray::new(
+            FieldNames::from(["a"]),
+            [buffer![1i32, 2, 3].into_array()],
+            3,
+            Validity::NonNullable,
+        )
+        .into_array();
+        let (mut ptr, _eof) = SequenceId::root().split();
+        acc.process(Ok((ptr.advance(), chunk)))?;
+
+        let aggregates = acc.aggregate_stats()?;
+        assert!(
+            aggregates[0]
+                .iter()
+                .any(|stat| stat.aggregate_fn().is::<Max>())
+        );
+        assert!(
+            !aggregates[0]
+                .iter()
+                .any(|stat| stat.aggregate_fn().is::<Sum>())
+        );
+        assert_eq!(
+            acc.legacy_aggregate_stats()?[0]
+                .get(&agg(Stat::Sum))
+                .and_then(Scalar::into_value),
+            Precision::exact(ScalarValue::from(6i64))
+        );
         Ok(())
     }
 }

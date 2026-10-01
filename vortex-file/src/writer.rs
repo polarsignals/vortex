@@ -160,13 +160,16 @@ impl VortexWriteOptions {
     ///
     /// Pass an empty vector to omit file-level statistics. If left unset, the writer chooses
     /// pruning aggregates from the file dtype.
+    ///
+    /// Like zone maps, file statistics only record aggregates the enabled editions include: the
+    /// write fails if this asks for one they don't, while the defaults leave such aggregates out.
     pub fn with_file_statistics(mut self, file_statistics: Vec<AggregateFnRef>) -> Self {
         self.file_statistics = Some(file_statistics);
         self
     }
 
     /// Exclude legacy top-level-only statistics (`field_stats`) from the file, computing and
-    /// writing only the full nested post-order statistics (`nested_field_stats`).
+    /// writing only the full nested post-order statistics (`nested_field_aggregates`).
     ///
     /// Readers built before nested file stats existed only look at `field_stats` and validate its
     /// length against the number of top-level struct fields; omitting it means those readers find
@@ -296,7 +299,8 @@ impl VortexWriteOptions {
             self.file_statistics.clone().map(Arc::from),
             &self.session,
             self.write_legacy_statistics,
-        );
+            &ctx,
+        )?;
 
         // First, write the magic bytes.
         write.write_all(ByteBuffer::copy_from(MAGIC_BYTES)).await?;
@@ -342,8 +346,8 @@ impl VortexWriteOptions {
             None
         } else {
             Some(FileStatistics::new_with_dtype(
-                file_stats.stats_sets().into(),
-                file_stats.legacy_stats_sets().into(),
+                file_stats.aggregate_stats()?.into(),
+                file_stats.legacy_aggregate_stats()?.into(),
                 &dtype,
             ))
         };

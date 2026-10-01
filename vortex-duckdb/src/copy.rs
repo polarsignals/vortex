@@ -12,6 +12,14 @@ use object_store::ObjectStore;
 use object_store::registry::ObjectStoreRegistry;
 use parking_lot::Mutex;
 use static_assertions::assert_impl_all;
+use vortex::aggregate_fn::AggregateFnRef;
+use vortex::aggregate_fn::AggregateFnVTableExt;
+use vortex::aggregate_fn::EmptyOptions;
+use vortex::aggregate_fn::NumericalAggregateOpts;
+use vortex::aggregate_fn::fns::max::Max;
+use vortex::aggregate_fn::fns::min::Min;
+use vortex::aggregate_fn::fns::nan_count::NanCount;
+use vortex::aggregate_fn::fns::null_count::NullCount;
 use vortex::array::ArrayRef;
 use vortex::array::stream::ArrayStreamAdapter;
 use vortex::dtype::DType;
@@ -25,7 +33,6 @@ use vortex::error::VortexResult;
 use vortex::error::vortex_bail;
 use vortex::error::vortex_err;
 use vortex::expr::stats::Precision;
-use vortex::expr::stats::Stat;
 use vortex::file::CompressedFieldSizes;
 use vortex::file::FileStatistics;
 use vortex::file::WriteOptionsSessionExt;
@@ -289,16 +296,18 @@ fn column_stats_from_summary(
             stats_columns.len()
         )
     })?;
-    let (stats, dtype) = file_stats.get(stats_index);
+    let (aggregates, dtype) = file_stats.get(stats_index);
     let path = &file_stats.paths()[stats_index];
+    let value =
+        |aggregate_fn: AggregateFnRef| aggregates.get(&aggregate_fn).and_then(Scalar::into_value);
 
     Ok(WrittenColumnStats {
         column_key: ducklake_column_key(path),
-        min: exact_scalar_to_duckdb(stats.get(Stat::Min), dtype)?,
-        max: exact_scalar_to_duckdb(stats.get(Stat::Max), dtype)?,
-        null_count: exact_u64(stats.get(Stat::NullCount)),
+        min: exact_scalar_to_duckdb(value(Min.bind(NumericalAggregateOpts::skip_nans())), dtype)?,
+        max: exact_scalar_to_duckdb(value(Max.bind(NumericalAggregateOpts::skip_nans())), dtype)?,
+        null_count: exact_u64(value(NullCount.bind(EmptyOptions))),
         // NaNCount is exact only for float columns, so this is emitted just for them (as in parquet).
-        has_nan: exact_u64(stats.get(Stat::NaNCount)).map(|count| count > 0),
+        has_nan: exact_u64(value(NanCount.bind(EmptyOptions))).map(|count| count > 0),
         num_values: summary.row_count(),
         // On-disk compressed size; excludes bytes not attributable to a column (e.g. struct validity).
         column_size_bytes: column_sizes.and_then(|sizes| sizes.get(path)),
@@ -377,25 +386,19 @@ pub fn copy_to_initialize_global(
 #[cfg(test)]
 mod tests {
     use vortex::array::IntoArray;
-    use vortex::array::aggregate_fn::AggregateFnRef;
     use vortex::array::arrays::StructArray;
     use vortex::array::validity::Validity;
     use vortex::buffer::ByteBufferMut;
     use vortex::buffer::buffer;
+    use vortex::expr::stats::Stat;
 
     use super::*;
 
     fn pruning_aggregate_fns() -> Vec<AggregateFnRef> {
-        [
-            Stat::Min,
-            Stat::Max,
-            Stat::Sum,
-            Stat::NullCount,
-            Stat::NaNCount,
-        ]
-        .into_iter()
-        .filter_map(|stat| stat.aggregate_fn())
-        .collect()
+        [Stat::Min, Stat::Max, Stat::NullCount, Stat::NaNCount]
+            .into_iter()
+            .filter_map(|stat| stat.aggregate_fn())
+            .collect()
     }
 
     /// Writes a one-column file and returns its summary, with `file_statistics` controlling which

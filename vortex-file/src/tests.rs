@@ -56,6 +56,7 @@ use vortex_array::expr::lt_eq;
 use vortex_array::expr::or;
 use vortex_array::expr::root;
 use vortex_array::expr::select;
+use vortex_array::expr::stats::Precision;
 use vortex_array::expr::stats::Stat;
 use vortex_array::extension::datetime::TimeUnit;
 use vortex_array::extension::datetime::Timestamp;
@@ -89,6 +90,7 @@ use vortex_layout::DynLayout;
 use vortex_layout::LayoutStrategy;
 use vortex_layout::layouts::buffered::BufferedStrategy;
 use vortex_layout::layouts::chunked::writer::ChunkedLayoutStrategy;
+use vortex_layout::layouts::file_stats::AggregateStats;
 use vortex_layout::layouts::flat::writer::FlatLayoutStrategy;
 use vortex_layout::layouts::struct_::StructStrategy;
 use vortex_layout::layouts::table::TableStrategy;
@@ -122,16 +124,18 @@ static SESSION: LazyLock<VortexSession> = LazyLock::new(|| {
 });
 
 fn pruning_aggregate_fns() -> Vec<AggregateFnRef> {
-    [
-        Stat::Min,
-        Stat::Max,
-        Stat::Sum,
-        Stat::NullCount,
-        Stat::NaNCount,
-    ]
-    .into_iter()
-    .filter_map(|stat| stat.aggregate_fn())
-    .collect()
+    [Stat::Min, Stat::Max, Stat::NullCount, Stat::NaNCount]
+        .into_iter()
+        .filter_map(|stat| stat.aggregate_fn())
+        .collect()
+}
+
+/// The value the file statistics entry `aggregates` resolves for `stat`.
+fn stat_value(aggregates: &AggregateStats, stat: Stat) -> Precision<ScalarValue> {
+    let aggregate_fn = stat
+        .aggregate_fn()
+        .vortex_expect("test only uses stats with an aggregate fn");
+    aggregates.get(&aggregate_fn).and_then(Scalar::into_value)
 }
 
 fn strict_sorted(indices: Buffer<u64>) -> StrictSortedBuffer<u64> {
@@ -1439,8 +1443,8 @@ async fn write_nullable_top_level_struct() -> VortexResult<()> {
         .get_by_path(&FieldPath::root())
         .expect("root struct should have its own null-count stats entry");
     assert_eq!(
-        root_stats.get(Stat::NullCount).as_exact(),
-        Some(ScalarValue::from(2u64))
+        stat_value(root_stats, Stat::NullCount),
+        Precision::exact(ScalarValue::from(2u64))
     );
 
     Ok(())
@@ -1488,8 +1492,8 @@ async fn exclude_legacy_statistics_omits_legacy_but_keeps_nested() -> VortexResu
         .get_by_path(&field_path!(a.b))
         .expect("nested field stats should still resolve by path");
     assert_eq!(
-        b_stats.get(Stat::NullCount).as_exact(),
-        Some(ScalarValue::from(1u64))
+        stat_value(b_stats, Stat::NullCount),
+        Precision::exact(ScalarValue::from(1u64))
     );
 
     Ok(())
@@ -2200,6 +2204,55 @@ async fn test_writer_with_statistics() -> VortexResult<()> {
 
     assert!(summary.footer().statistics().is_some());
     assert_eq!(summary.row_count(), 5);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn default_string_stats_are_exact_within_the_byte_bound_after_reopening() -> VortexResult<()>
+{
+    // The default string min/max are byte-bounded, and only exact when nothing was truncated.
+    // The footer stores partial states, which don't record that exactness, so it has to survive
+    // as the recorded aggregate itself.
+    let long = "x".repeat(100);
+    let array = StructArray::from_fields(&[
+        (
+            "short",
+            VarBinViewArray::from_iter_str(["apple", "banana"]).into_array(),
+        ),
+        (
+            "long",
+            VarBinViewArray::from_iter_str(["a", long.as_str()]).into_array(),
+        ),
+    ])?
+    .into_array();
+
+    let mut buf = ByteBufferMut::empty();
+    SESSION
+        .write_options()
+        .write(&mut buf, array.to_array_stream())
+        .await?;
+    let file = SESSION.open_options().open_buffer(ByteBuffer::from(buf))?;
+    let stats = file
+        .file_stats()
+        .expect("file statistics should be present");
+
+    let (short, _) = stats.get_by_path(&field_path!(short)).expect("short stats");
+    assert_eq!(
+        stat_value(short, Stat::Max),
+        Precision::exact(ScalarValue::from("banana"))
+    );
+    assert_eq!(
+        stat_value(short, Stat::Min),
+        Precision::exact(ScalarValue::from("apple"))
+    );
+
+    let (long, _) = stats.get_by_path(&field_path!(long)).expect("long stats");
+    assert!(stat_value(long, Stat::Max).as_inexact().is_some());
+    assert_eq!(
+        stat_value(long, Stat::Min),
+        Precision::exact(ScalarValue::from("a"))
+    );
 
     Ok(())
 }
